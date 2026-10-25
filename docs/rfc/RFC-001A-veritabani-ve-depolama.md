@@ -6,7 +6,7 @@
 | Tarih | 2026-10-25 |
 | Kapsam | SQLite şeması (tam SQL), dosya sistemi / import / atomic write / disk UUID takibi / BLAKE3 + pHash / bit-rot |
 | Kapsam dışı (Adım 1B) | AI iş kuyruğu (`jobs`, `sync_queue`), LAN Sync el sıkışması (`devices`, `lan_transfers`), Anti-Slop CSS tasarım sistemi |
-| Şema dosyası | [`crates/mp-db/migrations/0001_initial.sql`](../../crates/mp-db/migrations/0001_initial.sql) |
+| Şema dosyası | [`crates/loupe-db/migrations/0001_initial.sql`](../../crates/loupe-db/migrations/0001_initial.sql) |
 | Şema testi | [`tools/schema-check/check_schema.py`](../../tools/schema-check/check_schema.py) |
 
 ---
@@ -28,24 +28,24 @@
 |---|---|
 | V1 | Tek kullanıcı, tek masaüstü, Linux (x86_64 / aarch64), 100k–500k medya. |
 | V2 | **Katalog veritabanı her zaman yerel diskte** (`$XDG_DATA_HOME`). SQLite'ın kilitleme modeli NFS/SMB üzerinde güvenilir değildir; NAS'ta yalnızca medya dosyaları durur. |
-| V3 | Uygulama orijinal dosyalara **asla yazmaz**. Kullanıcı verisi (puan, etiket, düzenleme) veritabanında ve sidecar dosyalarında (`.xmp`, `.mpjson`) tutulur. |
+| V3 | Uygulama orijinal dosyalara **asla yazmaz**. Kullanıcı verisi (puan, etiket, düzenleme) veritabanında ve sidecar dosyalarında (`.xmp`, `.loupe.json`) tutulur. |
 | V4 | Import modları: **Kopyala**, **Taşı**, **Hardlink**. Bunlara ek olarak mevcut bir klasör **referans kütüphanesi** olarak eklenebilir (`is_managed = 0`): dosyalara dokunulmaz, yeniden adlandırılmaz, `YYYY/MM/DD` düzeni zorlanmaz. |
 | V5 | Tam kopya engeli **kütüphaneye yeni yazılan** dosyalar içindir. Referans kütüphanesinde zaten var olan tam kopyalar silinmez; `media_duplicates` tablosunda raporlanır. |
-| V6 | Her kütüphaneye aynı anda yalnızca **bir** `magicphotod` süreci yazar (kütüphane kilidi, §3.5). Bu, `RENAME_NOREPLACE` olmayan dosya sistemlerindeki yedek yolun güvenliğinin temelidir. |
+| V6 | Her kütüphaneye aynı anda yalnızca **bir** `louped` süreci yazar (kütüphane kilidi, §3.5). Bu, `RENAME_NOREPLACE` olmayan dosya sistemlerindeki yedek yolun güvenliğinin temelidir. |
 
 ---
 
 ## 1. Genel yerleşim
 
 ```
-$XDG_DATA_HOME/magicphoto/
+$XDG_DATA_HOME/loupe/
 └── catalog.db  (+ -wal, -shm)              # tek doğruluk kaynağı (metadata)
 
-$XDG_CACHE_HOME/magicphoto/thumbs/
+$XDG_CACHE_HOME/loupe/thumbs/
 └── 9f/9f2c…41ad_grid.webp                  # silinebilir; blake3 ile adlandırılır
 
 <KÜTÜPHANE_KÖKÜ>/                           # örn. /run/media/oguz/Arsiv-4TB/Fotograflar
-├── .magicphoto/
+├── .loupe/
 │   ├── library.json                        # { "uuid": "…", "schema": 1, "created_at": … }
 │   ├── lock                                # flock: tek yazar (V6)
 │   ├── staging/                            # atomic write geçici alanı (AYNI dosya sistemi)
@@ -54,7 +54,7 @@ $XDG_CACHE_HOME/magicphoto/thumbs/
 └── 2026/10/24/
     ├── DSC_0412.NEF
     ├── DSC_0412.xmp                        # puan, renk etiketi, anahtar kelime, kişi bölgeleri
-    └── DSC_0412.mpjson                     # düzenleme yığını vb. (XMP'nin ifade edemediği)
+    └── DSC_0412.loupe.json                 # düzenleme yığını vb. (XMP'nin ifade edemediği)
 ```
 
 **Kilitlenmeme garantisi:** Uygulama silinse bile kullanıcıda okunabilir klasör ağacı, standart XMP sidecar'ları (Lightroom, darktable ve digiKam okuyabilir) ve JSONL manifest kalır.
@@ -65,10 +65,10 @@ $XDG_CACHE_HOME/magicphoto/thumbs/
 
 ### 2.1 Bağlantı ayarları
 
-PRAGMA'ların çoğu bağlantı başınadır, bu yüzden migrasyon dosyasında değil `mp-db` içinde, her bağlantı açılışında uygulanır:
+PRAGMA'ların çoğu bağlantı başınadır, bu yüzden migrasyon dosyasında değil `loupe-db` içinde, her bağlantı açılışında uygulanır:
 
 ```rust
-// crates/mp-db/src/conn.rs (tasarım; Adım 2'de yazılacak)
+// crates/loupe-db/src/conn.rs (tasarım; Adım 2'de yazılacak)
 pub fn open(path: &Path, role: Role) -> Result<Connection, DbError> {
     let flags = match role {
         Role::Writer => OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_CREATE,
@@ -135,7 +135,7 @@ Sanal vektör tabloları (`vec_faces`, `vec_face_centroids`, `vec_media_clip`) d
 
 ### 2.3 Tablolar ve tasarım kararları
 
-Tam SQL: [`0001_initial.sql`](../../crates/mp-db/migrations/0001_initial.sql) (24 tablo, 3 vektör tablosu, 1 view, 16 tetikleyici). Aşağıda yalnızca **neden**ler var.
+Tam SQL: [`0001_initial.sql`](../../crates/loupe-db/migrations/0001_initial.sql) (24 tablo, 3 vektör tablosu, 1 view, 16 tetikleyici). Aşağıda yalnızca **neden**ler var.
 
 | Tablo | Kritik kararlar |
 |---|---|
@@ -234,47 +234,47 @@ LIMIT 500;
 
 ```
 crates/
-├── mp-core/        Alan tipleri ve ortak hata tipleri (bağımlılığı yok)
-├── mp-db/          Bağlantı, migrasyonlar, tek yazar aktörü, depo (repository) trait'leri
-├── mp-hash/        BLAKE3 akış hash'leme, pHash (DCT)
-├── mp-volume/      Disk kimliği, mount/unmount olayları, dosya sistemi yetenek tespiti
-├── mp-store/       Kütüphane kilidi, düzen şablonu, atomic write, yerleştirme (copy/move/hardlink),
-│                   karantina, Verify Library
-├── mp-watch/       inotify + debounce + NAS yoklaması + açılış uzlaştırması
-├── mp-meta/        EXIF/XMP okuma (taken_at, GPS, kamera); sidecar okuma/yazma
-├── mp-ingest/      Import oturumu orkestrasyonu (yukarıdakileri trait'ler üzerinden birleştirir)
-└── magicphotod/    Bağlama (wiring): her şeyi başlatır, olay veriyolunu kurar
+├── loupe-core/        Alan tipleri ve ortak hata tipleri (bağımlılığı yok)
+├── loupe-db/          Bağlantı, migrasyonlar, tek yazar aktörü, depo (repository) trait'leri
+├── loupe-hash/        BLAKE3 akış hash'leme, pHash (DCT)
+├── loupe-volume/      Disk kimliği, mount/unmount olayları, dosya sistemi yetenek tespiti
+├── loupe-store/       Kütüphane kilidi, düzen şablonu, atomic write, yerleştirme (copy/move/hardlink),
+│                      karantina, Verify Library
+├── loupe-watch/       inotify + debounce + NAS yoklaması + açılış uzlaştırması
+├── loupe-meta/        EXIF/XMP okuma (taken_at, GPS, kamera); sidecar okuma/yazma
+├── loupe-ingest/      Import oturumu orkestrasyonu (yukarıdakileri trait'ler üzerinden birleştirir)
+└── louped/           Bağlama (wiring): her şeyi başlatır, olay veriyolunu kurar
 ```
 
 ```mermaid
 flowchart BT
-  core["mp-core"]
-  hash["mp-hash"] --> core
-  db["mp-db"] --> core
-  vol["mp-volume"] --> core
-  meta["mp-meta"] --> core
-  store["mp-store"] --> core
+  core["loupe-core"]
+  hash["loupe-hash"] --> core
+  db["loupe-db"] --> core
+  vol["loupe-volume"] --> core
+  meta["loupe-meta"] --> core
+  store["loupe-store"] --> core
   store --> hash
-  watch["mp-watch"] --> core
-  ingest["mp-ingest"] --> core
+  watch["loupe-watch"] --> core
+  ingest["loupe-ingest"] --> core
   ingest -. "trait: MediaRepo" .-> db
   ingest -. "trait: Placer, Verifier" .-> store
   ingest -. "trait: MetadataReader" .-> meta
   ingest -. "olay: FsEvent" .-> watch
   ingest -. "olay: VolumeEvent" .-> vol
-  daemon["magicphotod"] --> ingest & db & store & watch & vol & meta & hash
+  daemon["louped"] --> ingest & db & store & watch & vol & meta & hash
 ```
 
 **Ayrıklık kuralları:**
-- `mp-store`, `mp-watch`, `mp-volume` veritabanını **bilmez**. Yalnızca dosya sistemiyle konuşur ve tipli sonuç/olay döner.
-- `mp-db` dosya sistemini **bilmez**.
-- Birleştirme yalnızca `mp-ingest`'te, trait'ler üzerinden yapılır; testlerde her biri sahte (fake) uygulamayla değiştirilebilir.
+- `loupe-store`, `loupe-watch`, `loupe-volume` veritabanını **bilmez**. Yalnızca dosya sistemiyle konuşur ve tipli sonuç/olay döner.
+- `loupe-db` dosya sistemini **bilmez**.
+- Birleştirme yalnızca `loupe-ingest`'te, trait'ler üzerinden yapılır; testlerde her biri sahte (fake) uygulamayla değiştirilebilir.
 - Modüller arası iletişim sınırlı (bounded) `tokio::mpsc` kanallarıyla: geri basınç doğal olarak oluşur, 50.000 dosyalık bir klasör bırakıldığında bellek sabit kalır.
 
 ### 3.2 Temel tipler ve hata tipleri
 
 ```rust
-// mp-core
+// loupe-core
 pub struct Blake3Hash(pub [u8; 32]);
 pub struct PHash(pub u64);
 pub struct LibraryId(i64);
@@ -287,7 +287,7 @@ pub struct RelPath(String);
 
 pub enum ImportMode { Copy, Move, Hardlink }
 
-// mp-store
+// loupe-store
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error("kütüphane kilitli: başka bir süreç yazıyor ({holder})")]
@@ -311,7 +311,7 @@ pub enum StoreError {
 
 Kurallar: `unwrap`, `expect`, `panic` workspace genelinde `deny`. Her `std::io::Error`, hangi işlemde (`IoOp::Fsync`, `IoOp::Rename`…) ve hangi yolda oluştuğuyla sarılır; kullanıcı hata mesajı `ENOSPC`, `EROFS`, `EIO` gibi durumları ayırt edebilir.
 
-### 3.3 Harici disk UUID takibi (`mp-volume`)
+### 3.3 Harici disk UUID takibi (`loupe-volume`)
 
 ```mermaid
 flowchart TD
@@ -323,7 +323,7 @@ flowchart TD
   M -- "volume_uuid eşleşti" --> P["Yol = mount noktası + rel_root"]
   M -- "network_source eşleşti (NAS)" --> P
   M -- "eşleşme yok" --> X["Yoksay"]
-  P --> K{".magicphoto/library.json<br/>okunabiliyor ve uuid eşleşiyor mu?"}
+  P --> K{".loupe/library.json<br/>okunabiliyor ve uuid eşleşiyor mu?"}
   K -- "hayır: dosya yok" --> K1["state = error, MARKER_MISSING<br/>(yanlış klasör / boş disk; ASLA yeni kütüphane sanılmaz)"]
   K -- "hayır: farklı uuid" --> K2["state = error, MARKER_MISMATCH"]
   K -- evet --> W{"Yazılabilir mi?"}
@@ -335,9 +335,9 @@ flowchart TD
 
 - **Neden iki kaynak:** udisks2 çoğu masaüstünde var ve aygıt kimliğini doğrudan verir; ama sunucu kurulumlarında veya `fstab` ile bağlanan NAS'larda olmayabilir. `mountinfo` her durumda çalışır.
 - **Neden işaret dosyası:** Aynı UUID'ye sahip disk klonları ve bağlanmamış bir mount noktasına (boş dizin) yazma riski. `library.json` yoksa uygulama **asla** o dizine yazmaz.
-- **Yetenek testi** (`.magicphoto/staging` içinde, bağlanınca bir kez): `link()` denemesi → `supports_hardlink`; `renameat2(RENAME_NOREPLACE)` denemesi → `supports_noreplace` (`EINVAL` ise yok); fs tipi `nfs*`/`cifs`/`fuse.*` ise `supports_inotify = 0` ve `watch_mode = poll`.
+- **Yetenek testi** (`.loupe/staging` içinde, bağlanınca bir kez): `link()` denemesi → `supports_hardlink`; `renameat2(RENAME_NOREPLACE)` denemesi → `supports_noreplace` (`EINVAL` ise yok); fs tipi `nfs*`/`cifs`/`fuse.*` ise `supports_inotify = 0` ve `watch_mode = poll`.
 
-### 3.4 Import: Kopyala / Taşı / Hardlink (`mp-ingest`)
+### 3.4 Import: Kopyala / Taşı / Hardlink (`loupe-ingest`)
 
 ```mermaid
 flowchart TD
@@ -397,17 +397,17 @@ stateDiagram-v2
   failed --> pending: kullanıcı "yeniden dene"
 ```
 
-### 3.5 Atomic write protokolü (`mp-store`)
+### 3.5 Atomic write protokolü (`loupe-store`)
 
 ```mermaid
 sequenceDiagram
   autonumber
   participant S as Kaynak
-  participant W as mp-store::AtomicWriter
+  participant W as loupe-store::AtomicWriter
   participant FS as Hedef dosya sistemi
-  participant DB as mp-db (tek yazar)
+  participant DB as loupe-db (tek yazar)
 
-  W->>FS: flock(.magicphoto/lock, LOCK_EX | LOCK_NB) (oturum boyunca)
+  W->>FS: flock(.loupe/lock, LOCK_EX | LOCK_NB) (oturum boyunca)
   W->>FS: statvfs: boş alan yeterli mi?
   W->>FS: open(staging/{uuid}.part, O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644)
   W->>FS: fallocate(boyut) (destekleniyorsa: parçalanmayı ve ENOSPC sürprizini önler)
@@ -458,7 +458,7 @@ Değişmez sıra: **dosya → fsync → veritabanı → (varsa) kaynak silme.** 
 | NFS v4 | çekirdeğe ve sunucuya bağlı | ✓ | ✗ (uzak değişiklikler) | `watch_mode = poll` |
 | SMB/CIFS | çekirdeğe ve sunucuya bağlı | sunucuya bağlı | ✗ | `watch_mode = poll` |
 
-### 3.6 BLAKE3 ve pHash (`mp-hash`)
+### 3.6 BLAKE3 ve pHash (`loupe-hash`)
 
 | | BLAKE3 | pHash |
 |---|---|---|
@@ -473,7 +473,7 @@ Değişmez sıra: **dosya → fsync → veritabanı → (varsa) kaynak silme.** 
 2. Ayrıca `taken_at_utc ± 10 dk` penceresindeki medyalarla Hamming ≤ 8 karşılaştırılır (seri çekim).
 3. Eşleşme varsa mevcut gruba katılır, yoksa iki medya için yeni grup açılır. Hiçbir dosya silinmez; kullanıcı gözden geçirip `keeper_media_id` seçer.
 
-### 3.7 Sürekli izleme: inotify, debounce, uzlaştırma (`mp-watch`)
+### 3.7 Sürekli izleme: inotify, debounce, uzlaştırma (`loupe-watch`)
 
 ```mermaid
 flowchart TD
@@ -504,7 +504,7 @@ flowchart TD
 ```
 
 - **Neden `IN_CLOSE_WRITE`, `IN_MODIFY` değil:** Yazımı süren bir dosya asla hash'lenmez. Kararlılık kontrolü, `CLOSE_WRITE` vermeyen yazarlar (bazı senkron araçları) için ek güvencedir.
-- **Kendi yazdıklarımız:** `mp-store` her yerleştirmeden önce hedef yolu bir "beklenen olaylar" kümesine ekler; izleyici bu olayları 10 sn boyunca yok sayar (aksi halde kendi import'umuzu yeniden işleriz).
+- **Kendi yazdıklarımız:** `loupe-store` her yerleştirmeden önce hedef yolu bir "beklenen olaylar" kümesine ekler; izleyici bu olayları 10 sn boyunca yok sayar (aksi halde kendi import'umuzu yeniden işleriz).
 - **`max_user_watches`:** Başlangıçta dizin sayısı hesaplanır (`YYYY/MM/DD` ile 10 yılda ~3.650 dizin). Limit yetersizse arayüzde net uyarı + `sysctl` komutu; izlenemeyen alt ağaçlar yoklamaya düşer.
 - **Rename tespiti:** Aynı `cookie` taşıyan `MOVED_FROM`/`MOVED_TO` çifti tek olaydır. Kütüphane dışından içeri taşınan (yalnızca `MOVED_TO`) dosya "yeni"dir. Çift kaçarsa `(device_id, inode)` indeksi yedek eşleştirmedir.
 
@@ -525,7 +525,7 @@ flowchart TD
   E -- hayır --> F{"mtime değişmiş mi?"}
   F -- "evet ve referans kütüphanesi" --> G["Bilinçli düzenleme: blake3 güncelle"]
   F -- "hayır, VEYA yönetilen kütüphane" --> H["mismatch (bit-rot veya dış müdahale)"]
-  H --> I["Bozuk dosyayı .magicphoto/quarantine/ altına TAŞI<br/>(üzerine yazılmaz, silinmez)"]
+  H --> I["Bozuk dosyayı .loupe/quarantine/ altına TAŞI<br/>(üzerine yazılmaz, silinmez)"]
   I --> J{"Sağlam kopya var mı?"}
   J -- "bulutta (sync_status = synced)" --> K1["Geri yükleme önerisi: indir → (age çöz) →<br/>BLAKE3 doğrula → §3.5 atomic write"]
   J -- "başka kütüphanede (aynı blake3)" --> K2["Yerel kopyadan geri yükleme önerisi"]

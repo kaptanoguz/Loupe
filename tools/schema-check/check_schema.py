@@ -1,7 +1,7 @@
 """Şema duman testi: migrasyonu gerçek SQLite + sqlite-vec üzerinde çalıştırır,
 kısıtları, tetikleyicileri ve indeks planlarını kontrol eder.
 
-Kullanım: pip install sqlite-vec && python3 tools/schema-check/check_schema.py crates/mp-db/migrations/0001_initial.sql
+Kullanım: pip install sqlite-vec && python3 tools/schema-check/check_schema.py crates/loupe-db/migrations/0001_initial.sql
 """
 import sqlite3, sqlite_vec, sys, struct, os
 db = sqlite3.connect(":memory:", isolation_level=None)

@@ -1,12 +1,12 @@
 -- =============================================================================
--- Magic Photo — Katalog şeması, migrasyon 0001
+-- Loupe — Katalog şeması, migrasyon 0001
 -- RFC-001A §2. Hedef: SQLite >= 3.45, sqlite-vec >= 0.1.6
 --
 -- Kurallar:
 --   * Tüm zaman damgaları UTC epoch milisaniye (INTEGER).
 --   * Hash'ler ham BLOB (BLAKE3 = 32 bayt). pHash = 64-bit işaretli INTEGER.
 --   * Tüm tablolar STRICT: yanlış tipte değer yazmak hata verir.
---   * Bağlantı başına PRAGMA'lar burada DEĞİL, mp-db::Connection::open içinde
+--   * Bağlantı başına PRAGMA'lar burada DEĞİL, loupe-db::Connection::open içinde
 --     uygulanır (bkz. RFC-001A §2.2). Bu dosya tek transaction içinde çalışır.
 --   * Bu dosya bir kez uygulandıktan sonra değiştirilmez; değişiklik = yeni migrasyon.
 -- =============================================================================
@@ -19,7 +19,7 @@ PRAGMA user_version = 1;
 CREATE TABLE libraries (
   id                    INTEGER PRIMARY KEY,
   uuid                  BLOB    NOT NULL UNIQUE CHECK (length(uuid) = 16),
-                                -- <kök>/.magicphoto/library.json içindekiyle aynı
+                                -- <kök>/.loupe/library.json içindekiyle aynı
   name                  TEXT    NOT NULL CHECK (length(name) BETWEEN 1 AND 120),
   kind                  TEXT    NOT NULL CHECK (kind IN ('internal','removable','network')),
 
@@ -32,7 +32,7 @@ CREATE TABLE libraries (
                                 -- mount noktasına GÖRE kök: 'Fotograflar'
   last_mount_path       TEXT,   -- son bilinen mutlak yol (yalnızca ipucu; doğruluk kaynağı değil)
 
-  -- Yetenekler (bağlanınca ölçülür, mp-volume tarafından güncellenir)
+  -- Yetenekler (bağlanınca ölçülür, loupe-volume tarafından güncellenir)
   supports_hardlink     INTEGER NOT NULL DEFAULT 0 CHECK (supports_hardlink IN (0,1)),
   supports_noreplace    INTEGER NOT NULL DEFAULT 0 CHECK (supports_noreplace IN (0,1)),
   supports_inotify      INTEGER NOT NULL DEFAULT 0 CHECK (supports_inotify IN (0,1)),
@@ -299,7 +299,7 @@ CREATE INDEX media_duplicates_media ON media_duplicates (media_id);
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 6. KÜÇÜK RESİMLER
 --    Baytlar DB'de değil önbellek dizinindedir:
---      $XDG_CACHE_HOME/magicphoto/thumbs/<blake3[0:2]>/<blake3>_<size_class>.<format>
+--      $XDG_CACHE_HOME/loupe/thumbs/<blake3[0:2]>/<blake3>_<size_class>.<format>
 --    Arayüz bunları thumb://localhost/<media_id>/<size_class> özel protokolüyle
 --    alır (JSON IPC yok, base64 yok). Bu tablo yalnızca envanter ve geçerliliktir.
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -511,7 +511,7 @@ CREATE INDEX smart_albums_pinned ON smart_albums (is_pinned, name);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 10. SÜRÜMLER VE DÜZENLEMELER (gelecekteki non-destructive düzenleme)
---     Orijinal dosya asla değiştirilmez. İşlem yığını DB'de ve .mpjson sidecar'ında.
+--     Orijinal dosya asla değiştirilmez. İşlem yığını DB'de ve .loupe.json sidecar'ında.
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE versions (
   id                 INTEGER PRIMARY KEY,
@@ -552,7 +552,7 @@ CREATE TABLE cloud_targets (
                   ('s3','b2','r2','wasabi','gdrive','onedrive','webdav','proton_rclone')),
   config          TEXT    NOT NULL CHECK (json_valid(config)),  -- gizli OLMAYAN: bucket, region, endpoint
   secret_ref      TEXT    NOT NULL,            -- Secret Service anahtar adı; sır DB'de tutulmaz
-  key_prefix      TEXT    NOT NULL DEFAULT 'magicphoto/',
+  key_prefix      TEXT    NOT NULL DEFAULT 'loupe/',
   encryption      TEXT    NOT NULL DEFAULT 'none' CHECK (encryption IN ('none','age')),
   age_recipient   TEXT    CHECK (age_recipient IS NULL OR age_recipient LIKE 'age1%'),
   bandwidth_bps   INTEGER CHECK (bandwidth_bps IS NULL OR bandwidth_bps > 0),
@@ -635,7 +635,7 @@ CREATE TABLE verify_findings (
   media_id       INTEGER NOT NULL REFERENCES media_files (id) ON DELETE CASCADE,
   kind           TEXT    NOT NULL CHECK (kind IN ('missing','mismatch','unreadable')),
   actual_blake3  BLOB    CHECK (actual_blake3 IS NULL OR length(actual_blake3) = 32),
-  quarantine_rel TEXT,                         -- .magicphoto/quarantine/… altındaki konum
+  quarantine_rel TEXT,                         -- .loupe/quarantine/… altındaki konum
   resolution     TEXT    NOT NULL DEFAULT 'open'
                  CHECK (resolution IN ('open','restored_cloud','restored_local','accepted','ignored')),
   found_at       INTEGER NOT NULL,
