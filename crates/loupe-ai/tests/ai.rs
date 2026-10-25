@@ -417,7 +417,7 @@ fn model_is_unloaded_after_idle_timeout_and_lazily_reloaded() {
     std::fs::create_dir_all(e.media_dir()).unwrap();
     let cache = ThumbCache::new(e.dir.path().join("thumbs"));
 
-    let idle = Duration::from_millis(150);
+    let idle = Duration::from_millis(300);
     let detector = Arc::new(ManagedModel::new(FaceDetector::info(&MockFaceDetector::default()).clone(), idle, || {
         Ok(MockFaceDetector::default())
     }));
@@ -445,7 +445,9 @@ fn model_is_unloaded_after_idle_timeout_and_lazily_reloaded() {
 
     assert!(!detector.is_loaded(), "ilk kullanıma kadar yüklenmez");
     assert_eq!(handler.detect_faces(ids[0]).unwrap(), 1);
-    assert!(detector.is_loaded() && embedder.is_loaded());
+    // Yüklü kalma süresi zamanlamaya bağlıdır (yavaş CI'da iş idle_timeout'u aşabilir):
+    // sayaçla doğrula.
+    assert_eq!((detector.load_count(), embedder.load_count()), (1, 1));
     assert!(
         wait_until(Duration::from_secs(3), || !detector.is_loaded() && !embedder.is_loaded()),
         "boşta boşaltılmalı"
