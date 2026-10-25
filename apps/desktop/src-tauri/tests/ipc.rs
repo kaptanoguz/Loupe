@@ -152,8 +152,16 @@ fn commands_round_trip_through_ipc() {
     assert_eq!(call(&w, "set_resource_mode", json!({ "mode": "quiet" })).unwrap()["resourceMode"], "quiet");
     assert_eq!(call(&w, "set_resource_mode", json!({ "mode": "x" })).unwrap_err()["code"], "INVALID");
 
-    // Wi-Fi: LAN sunucusu bu testte açık değil; QR isteği koda göre ayrılan hata döner.
-    assert_eq!(call(&w, "pairing_qr", json!({})).unwrap_err()["code"], "INVALID");
+    // Wi-Fi: sonuç makinenin ağına bağlı (LAN adresi yoksa koda göre ayrılan hata).
+    match call(&w, "pairing_qr", json!({})) {
+        Ok(qr) => {
+            assert_eq!(qr["ttlSecs"], 60);
+            assert!(qr["svg"].as_str().unwrap().contains("<path"), "QR yalnızca rect/path");
+            assert!(!qr["addrs"].as_array().unwrap().is_empty());
+            call(&w, "cancel_pairing", json!({})).unwrap();
+        }
+        Err(e) => assert_eq!(e["code"], "INVALID"),
+    }
     assert_eq!(call(&w, "list_devices", json!({})).unwrap(), json!([]));
     assert!(call(&w, "set_conflict_policy", json!({ "id": 1, "policy": "sometimes" })).is_err(), "bilinmeyen politika");
 
