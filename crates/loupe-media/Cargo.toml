@@ -1,0 +1,38 @@
+[package]
+name = "loupe-media"
+description = "Loupe medya hattı: EXIF/metadata, koordinat ve çevrimdışı GeoNames, XMP/JSON sidecar, küçük resim motoru ve thumb:// işleyicisi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["lossy-webp"]
+# Kayıplı WebP kodlayıcı (libwebp, kaynaktan derlenir; sistem kütüphanesi gerekmez).
+# Kapalıysa saf Rust `image` kodlayıcısı kayıpsız WebP üretir.
+lossy-webp = ["dep:webp"]
+# libvips arka ucu (`vipsthumbnail`; HEIC/AVIF ve shrink-on-load). Çalışma anında
+# vips kurulu değilse arka uç kullanılamaz, saf Rust arka uca düşülür.
+vips = []
+
+[dependencies]
+blake3.workspace = true
+http.workspace = true
+image.workspace = true
+kamadak-exif.workspace = true
+loupe-core.workspace = true
+quick-xml.workspace = true
+rstar.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+webp = { workspace = true, optional = true }
+
+[dev-dependencies]
+loupe-db.workspace = true
+rusqlite.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

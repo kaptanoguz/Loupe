@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/loupe-core", "crates/loupe-db", "crates/loupe-storage"]
+members = ["crates/loupe-core", "crates/loupe-db", "crates/loupe-storage", "crates/loupe-media", "crates/loupe-jobs"]
 
 [workspace.package]
 version = "0.1.0"
@@ -12,9 +12,16 @@ repository = "https://github.com/kaptanoguz/Magic-Photo"
 loupe-core = { path = "crates/loupe-core" }
 loupe-db = { path = "crates/loupe-db" }
 loupe-storage = { path = "crates/loupe-storage" }
+loupe-media = { path = "crates/loupe-media" }
+loupe-jobs = { path = "crates/loupe-jobs" }
 
 blake3 = "1.8"
-image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+http = "1"
+kamadak-exif = "0.6"
+quick-xml = "0.38"
+rstar = "0.12"
+webp = { version = "0.3", default-features = false }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 notify-debouncer-full = "0.7"
 rusqlite = { version = "0.41", features = ["bundled", "hooks", "functions"] }
 rustix = { version = "1.1", features = ["fs"] }

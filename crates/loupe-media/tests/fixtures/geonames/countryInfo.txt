@@ -1,0 +1,6 @@
+#ISO	ISO3	ISO-Numeric	fips	Country	Capital
+AR	ARG	032	AR	Argentina	Buenos Aires
+DE	DEU	276	GM	Germany	Berlin
+FJ	FJI	242	FJ	Fiji	Suva
+RU	RUS	643	RS	Russia	Moscow
+TR	TUR	792	TU	Turkey	Ankara

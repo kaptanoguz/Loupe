@@ -66,18 +66,20 @@ pub enum JobError {
 
 | Sınıf | İş | Ne zaman |
 |---|---|---|
-| **P0** | `thumb/grid` | Şu an görünür ve küçük resmi yok |
-| **P1** | `thumb/grid` | Görünür alanın ±1.5 ekran yakınında |
-| **P2** | `thumb/preview` + `metadata_full` | QuickLook (Space) veya denetçi (I) açık olan medya ve sağ/sol komşuları |
+| **P0** | `thumb/sm` | Şu an görünür ve küçük resmi yok |
+| **P1** | `thumb/sm` | Görünür alanın ±1.5 ekran yakınında |
+| **P2** | `thumb/md` + `metadata_full` | QuickLook (Space) veya denetçi (I) açık olan medya ve sağ/sol komşuları |
 | **P3** | `metadata_full`, `phash`, `geocode` | Yeni içe aktarılan (son 10 dk) |
 | **P4** | `face_detect`, `clip_embed` | Görünür olan veya açık kişi/arama sayfasındaki medya |
-| **P5** | `thumb/grid` | Kalan tüm kütüphane (toplu tarama) |
+| **P5** | `thumb/sm` | Kalan tüm kütüphane (toplu tarama) |
 | **P6** | `phash`, `geocode`, `metadata_full` | Kalan tüm kütüphane |
 | **P7** | `face_detect`, `clip_embed` | Kalan tüm kütüphane |
 | **P8** | `cluster_faces`, `cluster_events` | Yeni yüz/medya birikince, 30 sn debounce |
 | **P9** | `sidecar_write` | Kullanıcı alanı değişince (`sidecar_dirty`) |
 
 `jobs.base_priority` iş oluşturulurken yazılır (P3, P5–P9). P0–P2 ve P4 **yalnızca bellekte** var olan *boost*'lardır: veritabanına yazılmaz, çünkü kullanıcı kaydırdıkça saniyede onlarca kez değişirler.
+
+> **Adım 2B uygulaması:** `JobQueue::bump_viewport_priority(media_ids)` yükseltmeyi veritabanına tek transaction ile yazar (`base_priority = 0`) ve eski öncelikleri bellekte tutar; viewport değişince görünmez olan işler eski önceliklerine döner. Böylece işçiler ayrı bir bellek kanalına bakmadan aynı `ORDER BY base_priority, run_after, id` sorgusuyla (yeni `jobs_claim` kısmi indeksi) acil işi önce alır. 50 000 bekleyen işte yükseltme + 10 alma ~1 ms sürüyor; arayüz 100 ms'de bir bildirdiği için yazma yükü ihmal edilebilir. Çökme sonrası yükseltilmiş kalan işler yalnızca biraz erken çalışır.
 
 ### 1.3 Planlayıcı mimarisi (preemption)
 
@@ -149,9 +151,11 @@ flowchart LR
 | RAW | LibRaw `unpack_thumb` → gömülü JPEG önizleme → libvips | `full` boyutu gerekip önizleme yetersizse LibRaw yarım boyutlu demosaic |
 | Video | `ffmpeg` %10'daki anahtar kare | |
 
-Boyut sınıfları (`layout.ts` → `THUMB_PX`): **`grid`** yükseklik 512 px (WebP q78, ~25–45 KB), **`preview`** uzun kenar 1600 px (WebP q82), **`full`** uzun kenar 2560 px (yalnızca QuickLook ve tam ekran). Arayüz gereken piksel = satır yüksekliği × `devicePixelRatio` ≤ 512 ise `grid`, değilse `preview` ister; 2x ekranda 256 CSS px'e kadar tüm satırlar `grid` ile karşılanır.
+Boyut sınıfları (`layout.ts` → `THUMB_PX`): **`sm`** uzun kenar 256 px (WebP q72), **`md`** uzun kenar 768 px (WebP q78), **`lg`** uzun kenar 1920 px (WebP q82; QuickLook ve tam ekran). Kaynak küçükse büyütülmez. Arayüz gereken piksel = satır yüksekliği × `devicePixelRatio` ≤ 256 ise `sm`, ≤ 768 ise `md`, değilse `lg` ister.
 
-Önbellek: `$XDG_CACHE_HOME/loupe/thumbs/<blake3[0:2]>/<blake3>_<sınıf>.webp`. Dosya **önce geçici adla yazılıp `rename` edilir** (yarım küçük resim sunulmaz). Üst sınır `thumbs.cache_max_bytes` (8 GiB); dolarsa `thumbnails.last_access_at` ile LRU tahliye, `grid` en son silinir.
+> **Adım 2B değişikliği (migrasyon 0004):** İlk tasarımdaki `grid`/`preview`/`full` (512/1600/2560) sınıfları kullanıcı kararıyla `sm`/`md`/`lg` (256/768/1920) oldu. Migrasyon bekleyen işleri `grid→sm`, `preview→md`, `full→lg` olarak taşır; `thumbnails` envanteri boşaltılır ve küçük resimler yeniden üretilir.
+
+Önbellek: `$XDG_CACHE_HOME/loupe/thumbs/<blake3[0:2]>/<blake3>_<sınıf>.webp`. Dosya **önce geçici adla yazılıp `rename` edilir** (yarım küçük resim sunulmaz). Üst sınır `thumbs.cache_max_bytes` (8 GiB); dolarsa `thumbnails.last_access_at` ile LRU tahliye, `sm` en son silinir.
 
 Aynı decode'dan, ek dosya okuması olmadan: **ThumbHash** (DB'ye, anlık yer tutucu) ve **pHash** girdisi (32×32 gri).
 
@@ -159,7 +163,9 @@ Aynı decode'dan, ek dosya okuması olmadan: **ThumbHash** (DB'ye, anlık yer tu
 
 JSON IPC ve base64 yok. WebView `<img src>` ile doğrudan protokolden okur.
 
-**URL:** `thumb://localhost/<media_id>/<sınıf>?v=<blake3'ün ilk 8 hex'i>` (Linux'ta Tauri özel şemaları `şema://localhost/…` biçimindedir). `v` parametresi içerik değişince URL'yi değiştirir; böylece önbellek başlığı `immutable` olabilir.
+**URL:** `thumb://<sınıf>/<blake3 hex>` (ör. `thumb://sm/9f2c…`). Adres içeriğin kendisidir: içerik değişince adres de değişir, bu yüzden yanıt `Cache-Control: public, max-age=31536000, immutable` taşır. WebView'ların yazdığı `thumb://localhost/sm/<hash>` (Linux/macOS) ve `http://thumb.localhost/sm/<hash>` (Windows) biçimleri de kabul edilir. İşleyici `loupe-media::ThumbProtocol`'dür; `register_uri_scheme_protocol("thumb", …)` içine doğrudan takılır.
+
+> **Adım 2B değişikliği:** İlk tasarımdaki `thumb://localhost/<media_id>/<sınıf>?v=…` biçimi yerine içerik adresli biçim seçildi. İşleyici DB'ye ve `media_id → blake3` haritasına hiç gitmez; aynı içerik iki konumda dursa da tek küçük resim vardır.
 
 ```mermaid
 sequenceDiagram
@@ -169,9 +175,9 @@ sequenceDiagram
   participant C as Disk önbelleği
   participant D as louped (UDS)
 
-  IMG->>H: GET thumb://localhost/48213/grid?v=9f2c41ad
-  H->>H: Yolu ayrıştır, doğrula (sayı, bilinen sınıf). Geçersizse 400
-  H->>C: open + fstat thumbs/9f/9f2c…_grid.webp
+  IMG->>H: GET thumb://sm/9f2c41ad…
+  H->>H: Yolu ayrıştır, doğrula (64 hex, bilinen sınıf). Geçersizse 400
+  H->>C: open + fstat thumbs/9f/9f2c…_sm.webp
   alt Önbellekte var
     C-->>H: dosya
     H-->>IMG: 200, image/webp, Cache-Control immutable, ETag
@@ -191,7 +197,7 @@ sequenceDiagram
 
 **"Sıfır kopya" ne demek, sınırı ne:** Serileştirme sıfırdır (JSON yok, base64 yok, Rust→JS nesne dönüşümü yok); baytlar dosyadan doğrudan WebKit'in ağ katmanına gider ve görüntü çözme WebKit'in kendi iş parçacıklarında yapılır. Çekirdek sayfa önbelleğinden WebKit'e **bir** kopya kaçınılmazdır (Tauri `Response` gövdesi sahipli bayt ister); 40 KB'lık bir dosya için bu ihmal edilebilir. Ana JS iş parçacığı hiçbir bayta dokunmaz.
 
-**Güvenlik:** `tauri.conf.json` CSP: `img-src 'self' thumb: data:`; işleyici yalnızca sayısal `media_id` ve sabit sınıf adlarını kabul eder, dosya yolu asla URL'den türetilmez (path traversal imkansız). Önbellek yolu `media_id → blake3` eşlemesi üzerinden, bellekteki LRU haritasından çözülür (DB'ye gitmeden).
+**Güvenlik:** `tauri.conf.json` CSP: `img-src 'self' thumb: data:`; işleyici yalnızca 64 karakterlik onaltılık özeti ve sabit sınıf adlarını kabul eder, dosya yolu asla URL'den türetilmez (path traversal imkansız).
 
 ### 1.6 AI işçileri ve model bellek yönetimi
 
@@ -643,7 +649,7 @@ N_düğüm ≈ (V + 2·O) / (Hₜ + g) × (W / (Hₜ · ā))
 **`.tile` sınıfı:** `contain: strict` (tarayıcı düğümün içini dışından bağımsız hesaplar), `will-change: transform` (kendi katmanında birleştirilir), `overflow: hidden`.
 
 **Görüntü yükleme:**
-- Gereken boyut = `h × devicePixelRatio` ≤ 512 → `grid`, aksi halde `preview`.
+- Gereken boyut = `h × devicePixelRatio` ≤ 256 → `sm`, ≤ 768 → `md`, aksi halde `lg`.
 - `<img decoding="async">` + düğüm yeniden kullanılırken eski `src` hemen kaldırılır (yanlış fotoğraf bir kare bile görünmez); yerine ThumbHash'ten üretilmiş 32×32 yer tutucu `data:` URL'si.
 - Hızlı kaydırmada (> 4 ekran/sn) yeni `src` atanmaz; yalnızca ThumbHash. Yavaşlayınca görünür alanın **merkezinden dışarıya** sırayla istenir (göz önce ortaya bakar).
 - Viewport, 100 ms'de bir daemon'a bildirilir (§1.3); daemon P0/P1'i buna göre ayarlar.
@@ -659,7 +665,7 @@ N_düğüm ≈ (V + 2·O) / (Hₜ + g) × (W / (Hₜ · ā))
 | Kısayol | Eylem |
 |---|---|
 | `Ctrl/Cmd + K` | Komut paleti ve arama (doğal dil dahil, CLIP metin kodlayıcısını yükler) |
-| `Space` | QuickLook: önce `preview`, sonra `full` (P2 acil kanal) |
+| `Space` | QuickLook: önce `md`, sonra `lg` (P2 acil kanal) |
 | `I` | EXIF / metadata denetçisi (`metadata_full` P2) |
 | `← → ↑ ↓` | Gezinme: komşu öğe düzen dizisinden hesaplanır, DOM sorgusu yok; ↑/↓ aynı x'e en yakın öğe |
 | `Enter` / `Esc` | Tam ekran / geri |

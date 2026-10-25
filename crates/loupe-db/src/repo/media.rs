@@ -1,5 +1,6 @@
 use loupe_core::{
-    Blake3Hash, CommitOutcome, ImportSessionId, LibraryId, MediaId, NewMediaFile, PHash, RelPath, VerifyState, now_ms,
+    Blake3Hash, CommitOutcome, ImportSessionId, LibraryId, MediaId, NewMediaFile, PHash, RelPath, TakenAtSource,
+    VerifyState, now_ms,
 };
 use rusqlite::{Connection, OptionalExtension, Row, Statement, params};
 
@@ -236,4 +237,83 @@ pub fn near_duplicates(conn: &Connection, phash: PHash, max_distance: u32) -> Re
         )?
         .collect::<Result<_, _>>()?;
     Ok(rows)
+}
+
+/// EXIF'ten çıkarılan sık filtrelenen alanlar (`loupe-media` metadata işi).
+/// `None` alanlar mevcut değeri korur; çekim zamanı yalnızca daha güvenilir bir
+/// kaynaktan geldiyse (`exif`/`gps`) yazılır.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MetadataUpdate {
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub orientation: Option<u8>,
+    pub taken_at: Option<(i64, Option<i32>, TakenAtSource)>,
+    pub gps: Option<(f64, f64, Option<f64>)>,
+    pub camera_make: Option<String>,
+    pub camera_model: Option<String>,
+    pub lens_model: Option<String>,
+    pub focal_length_mm: Option<f64>,
+    pub aperture_f: Option<f64>,
+    pub exposure_s: Option<f64>,
+    pub iso: Option<u32>,
+}
+
+pub fn apply_metadata(conn: &Connection, id: MediaId, m: &MetadataUpdate) -> Result<(), DbError> {
+    let (taken, tz, source) = match m.taken_at {
+        Some((t, tz, s)) => (Some(t), tz, Some(s.as_str())),
+        None => (None, None, None),
+    };
+    let (lat, lon, alt) = match m.gps {
+        Some((a, b, c)) => (Some(a), Some(b), c),
+        None => (None, None, None),
+    };
+    let n = conn.execute(
+        "UPDATE media_files SET
+            width = COALESCE(?2, width), height = COALESCE(?3, height),
+            orientation = COALESCE(?4, orientation),
+            taken_at_utc = COALESCE(?5, taken_at_utc),
+            tz_offset_min = CASE WHEN ?5 IS NULL THEN tz_offset_min ELSE ?6 END,
+            taken_at_source = COALESCE(?7, taken_at_source),
+            gps_lat = COALESCE(?8, gps_lat), gps_lon = COALESCE(?9, gps_lon), gps_alt_m = COALESCE(?10, gps_alt_m),
+            camera_make = COALESCE(?11, camera_make), camera_model = COALESCE(?12, camera_model),
+            lens_model = COALESCE(?13, lens_model), focal_length_mm = COALESCE(?14, focal_length_mm),
+            aperture_f = COALESCE(?15, aperture_f), exposure_s = COALESCE(?16, exposure_s),
+            iso = COALESCE(?17, iso), updated_at = ?18
+          WHERE id = ?1",
+        params![
+            id.0,
+            m.width,
+            m.height,
+            m.orientation,
+            taken,
+            tz,
+            source,
+            lat,
+            lon,
+            alt,
+            m.camera_make,
+            m.camera_model,
+            m.lens_model,
+            m.focal_length_mm,
+            m.aperture_f,
+            m.exposure_s,
+            m.iso,
+            now_ms()
+        ],
+    )?;
+    if n == 0 { Err(DbError::NotFound { entity: "medya", id: id.0 }) } else { Ok(()) }
+}
+
+/// Küçük resim ve ters coğrafi kodlama işlerinin ihtiyaç duyduğu iki alan:
+/// EXIF yönlendirmesi ve GPS konumu. Medya yoksa `None`.
+#[allow(clippy::type_complexity)]
+pub fn render_hints(conn: &Connection, id: MediaId) -> Result<Option<(Option<u8>, Option<(f64, f64)>)>, DbError> {
+    Ok(conn
+        .prepare_cached("SELECT orientation, gps_lat, gps_lon FROM media_files WHERE id = ?1")?
+        .query_row([id.0], |r| {
+            let lat: Option<f64> = r.get(1)?;
+            let lon: Option<f64> = r.get(2)?;
+            Ok((r.get(0)?, lat.zip(lon)))
+        })
+        .optional()?)
 }

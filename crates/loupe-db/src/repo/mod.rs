@@ -3,5 +3,7 @@
 
 pub mod import;
 pub mod library;
+pub mod location;
 pub mod media;
+pub mod thumbnail;
 pub mod verify;

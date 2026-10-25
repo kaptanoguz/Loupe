@@ -16,6 +16,10 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      # İsteğe bağlı libvips arka ucu ve kayıpsız (saf Rust) WebP yolu.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvips-tools
+      - run: cargo test -p loupe-media --features vips --locked
+      - run: cargo test -p loupe-media --no-default-features --locked
 
   schema:
     runs-on: ubuntu-latest

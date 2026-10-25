@@ -1,0 +1,22 @@
+[package]
+name = "loupe-jobs"
+description = "Loupe kalıcı iş kuyruğu: viewport önceliği, işçi havuzu, kısma, yeniden deneme ve dead-letter"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+loupe-core.workspace = true
+loupe-db.workspace = true
+loupe-media.workspace = true
+rusqlite.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+blake3.workspace = true
+image.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true
