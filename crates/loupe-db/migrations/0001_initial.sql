@@ -306,7 +306,7 @@ CREATE INDEX media_duplicates_media ON media_duplicates (media_id);
 CREATE TABLE thumbnails (
   media_id       INTEGER NOT NULL REFERENCES media_files (id) ON DELETE CASCADE,
   size_class     TEXT    NOT NULL CHECK (size_class IN ('grid','preview','full')),
-                                               -- uzun kenar: 256 / 1024 / 2048 px
+                                               -- grid: yükseklik 512 px; preview/full: uzun kenar 1600 / 2560 px (RFC-001B §1.3)
   format         TEXT    NOT NULL CHECK (format IN ('webp','avif','jpeg')),
   width          INTEGER NOT NULL CHECK (width  > 0),
   height         INTEGER NOT NULL CHECK (height > 0),
