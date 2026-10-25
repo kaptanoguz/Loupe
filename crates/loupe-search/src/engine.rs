@@ -29,6 +29,8 @@ use crate::query::SearchQuery;
 pub const RRF_K: f32 = 60.0;
 /// Süzgeçli anlamsal adımda bakılan en fazla aday.
 pub const MAX_CANDIDATES: usize = 100_000;
+/// sqlite-vec KNN sorgusunun `k` üst sınırı.
+pub const KNN_MAX: usize = 4_096;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SearchHit {
@@ -58,12 +60,14 @@ impl SearchResult {
 
 pub struct SearchEngine {
     pool: Arc<Pool>,
-    text: Arc<dyn ClipTextEncoder>,
+    /// `None`: AI kapalı; metin yalnızca adlarda sözcük olarak aranır.
+    text: Option<Arc<dyn ClipTextEncoder>>,
 }
 
 impl std::fmt::Debug for SearchEngine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SearchEngine").field("text_model", &self.text.info().name).finish_non_exhaustive()
+        let model = self.text.as_ref().map(|t| t.info().name.clone());
+        f.debug_struct("SearchEngine").field("text_model", &model).finish_non_exhaustive()
     }
 }
 
@@ -86,7 +90,19 @@ fn like_escape(s: &str) -> String {
 impl SearchEngine {
     #[must_use]
     pub fn new(pool: Arc<Pool>, text: Arc<dyn ClipTextEncoder>) -> Self {
-        Self { pool, text }
+        Self { pool, text: Some(text) }
+    }
+
+    /// CLIP modeli yokken: süzgeçler ve sözcük araması çalışır, anlamsal adım atlanır.
+    #[must_use]
+    pub fn keyword_only(pool: Arc<Pool>) -> Self {
+        Self { pool, text: None }
+    }
+
+    /// Anlamsal (CLIP) adım açık mı.
+    #[must_use]
+    pub fn is_semantic(&self) -> bool {
+        self.text.is_some()
     }
 
     #[must_use]
@@ -114,23 +130,25 @@ impl SearchEngine {
             return Ok(SearchResult { hits, candidates: 0, elapsed: started.elapsed() });
         };
 
-        let query_vec = self.text.encode_text(text)?;
+        let query_vec = self.text.as_ref().map(|t| t.encode_text(text)).transpose()?;
         let words = keywords(text);
         let filtered = q.has_filters();
         let pool_k = (limit * 4).max(200);
 
         let (semantic, keyword, candidates) = self.pool.read(|c| {
             // Anlamsal liste.
-            let (semantic, candidates) = if filtered {
+            let (semantic, candidates) = if let Some(query_vec) = &query_vec
+                && filtered
+            {
                 let sql = format!("{} LIMIT {MAX_CANDIDATES}", compiled.select("m.id"));
                 let ids: Vec<MediaId> = c
                     .prepare_cached(&sql)?
                     .query_map(params_from_iter(compiled.params.iter()), |r| Ok(MediaId(r.get(0)?)))?
                     .collect::<Result<_, _>>()?;
                 let n = ids.len();
-                (clip::similarities(c, &query_vec, &ids).map_err(ai_to_db)?, n)
-            } else {
-                let near = clip::knn(c, &query_vec, pool_k).map_err(ai_to_db)?;
+                (clip::similarities(c, query_vec, &ids).map_err(ai_to_db)?, n)
+            } else if let Some(query_vec) = &query_vec {
+                let near = clip::knn(c, query_vec, pool_k.min(KNN_MAX)).map_err(ai_to_db)?;
                 // Çöpteki medya KNN'den gelebilir: temel süzgeçten geçir.
                 let alive: std::collections::HashSet<i64> = if near.is_empty() {
                     std::collections::HashSet::new()
@@ -143,6 +161,8 @@ impl SearchEngine {
                 let near: Vec<_> = near.into_iter().filter(|(m, _)| alive.contains(&m.0)).collect();
                 let n = near.len();
                 (near, n)
+            } else {
+                (Vec::new(), 0)
             };
 
             // Sözcük listesi: eşleşen sözcük sayısına göre.

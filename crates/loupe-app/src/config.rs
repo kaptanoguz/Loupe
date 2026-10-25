@@ -6,6 +6,7 @@ use std::time::Duration;
 use loupe_jobs::WorkerConfig;
 use loupe_storage::volume::VolumeProbe;
 
+use crate::ai::AiMode;
 use crate::{AppError, AppResult};
 
 #[derive(Debug, Clone)]
@@ -22,6 +23,10 @@ pub struct AppConfig {
     pub watch: bool,
     pub watch_debounce: Duration,
     pub volume_probe: VolumeProbe,
+    /// Yüz/CLIP modelleri: `onnx`, `mock` ya da `off` (etkinlikler yine kümelenir).
+    pub ai: AiMode,
+    /// Sırlar için Linux Secret Service denensin mi (testlerde kapalı: gerçek anahtarlığa yazılmaz).
+    pub secret_service: bool,
 }
 
 impl AppConfig {
@@ -41,8 +46,11 @@ impl AppConfig {
             .map(|s| s.trim().to_owned())
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "Loupe".to_owned());
+        let data_dir = xdg("XDG_DATA_HOME", ".local/share")?;
         Ok(Self {
-            data_dir: xdg("XDG_DATA_HOME", ".local/share")?,
+            ai: AiMode::from_env(&data_dir),
+            secret_service: true,
+            data_dir,
             cache_dir: xdg("XDG_CACHE_HOME", ".cache")?,
             device_name,
             workers: Some(WorkerConfig::default()),
@@ -63,6 +71,8 @@ impl AppConfig {
             watch: false,
             watch_debounce: Duration::from_millis(200),
             volume_probe: VolumeProbe::default(),
+            ai: AiMode::Off { reason: "test".into() },
+            secret_service: false,
         }
     }
 
@@ -74,6 +84,12 @@ impl AppConfig {
     #[must_use]
     pub fn thumbs_dir(&self) -> PathBuf {
         self.cache_dir.join("thumbs")
+    }
+
+    /// `thumb://orig` için döndürülmüş tam boy kopyalar.
+    #[must_use]
+    pub fn full_dir(&self) -> PathBuf {
+        self.cache_dir.join("full")
     }
 
     #[must_use]

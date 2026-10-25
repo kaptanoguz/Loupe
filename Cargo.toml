@@ -61,6 +61,10 @@ url = "2"
 webpki-roots = "1"
 zeroize = "1"
 http = "1"
+if-addrs = "0.13"
+qrcode = { version = "0.14", default-features = false }
+# Linux Secret Service (GNOME Keyring / KWallet) DBus istemcisi; saf Rust (zbus, kendi yürütücüsü), libdbus gerekmez.
+secret-service = { version = "5", features = ["rt-async-io-crypto-rust"] }
 kamadak-exif = "0.6"
 quick-xml = "0.38"
 rstar = "0.12"
