@@ -4,7 +4,7 @@
 
   import type { InspectorDetail } from "../api/types";
   import { LABEL_BG, LABEL_NAME } from "../design/labels";
-  import { bytes, dateTime, resolution, shortHash } from "../format";
+  import { bytes, dateTimeMs, resolution, shortHash } from "../format";
   import Histogram from "./Histogram.svelte";
 
   interface Props {
@@ -157,7 +157,7 @@
                 </span>
               </div>
               {#if t.uploadedAt}
-                <div class="data text-2xs text-ink-3">{dateTime(t.uploadedAt)}</div>
+                <div class="data text-2xs text-ink-3">{dateTimeMs(t.uploadedAt)}</div>
               {/if}
             </li>
           {/each}

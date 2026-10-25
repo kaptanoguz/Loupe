@@ -1,11 +1,14 @@
 <script lang="ts">
   import Calendar from "@lucide/svelte/icons/calendar";
+  import CommandIcon from "@lucide/svelte/icons/command";
   import FolderPlus from "@lucide/svelte/icons/folder-plus";
   import Heart from "@lucide/svelte/icons/heart";
   import GalleryVerticalEnd from "@lucide/svelte/icons/gallery-vertical-end";
   import MapIcon from "@lucide/svelte/icons/map";
   import ScanFace from "@lucide/svelte/icons/scan-face";
+  import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import WandSparkles from "@lucide/svelte/icons/wand-sparkles";
+  import Wifi from "@lucide/svelte/icons/wifi";
   import type { Component } from "svelte";
 
   import type { ImportMode, ImportSessionDto, LibraryDto, View, ViewKey } from "../api/types";
@@ -43,8 +46,15 @@
   const simpleView = (kind: ViewKey): View => ({ kind });
 
   function active(v: View): boolean {
-    return sameView(v, catalog.view);
+    const cur = catalog.view;
+    // Tek kişi / tek etkinlik açıkken üst görünüm vurgulu kalır.
+    if (v.kind === "people" && (cur.kind === "person" || cur.kind === "cluster")) return true;
+    if (v.kind === "events" && cur.kind === "event") return true;
+    return sameView(v, cur);
   }
+
+  const lan = $derived(catalog.status?.lan);
+  const mac = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 
   function libTitle(l: LibraryDto): string {
     const parts = [l.root ?? "bağlı değil", `disk ${l.volumeUuid ?? "?"}`, `kütüphane ${l.uuid}`];
@@ -172,5 +182,35 @@
       </button>
       <button class="btn btn-primary flex-1 justify-center" onclick={() => onImport(mode)}>İçe Aktar</button>
     </div>
+  </div>
+
+  <div class="flex h-8 shrink-0 items-stretch border-t border-line text-xs" aria-label="Hızlı erişim">
+    <button
+      class="flex flex-1 items-center gap-2 px-3 text-ink-2 hover:bg-raised hover:text-ink"
+      onclick={() => (catalog.overlay = "wifi")}
+      title="Wi-Fi Telefon Eşleştir"
+    >
+      <Wifi size={14} strokeWidth={1.5} />
+      <span>Telefon</span>
+      <span class="data text-2xs {lan && lan.activeUploads > 0 ? 'text-amber' : 'text-ink-3'}">
+        {lan ? (lan.activeUploads > 0 ? `↓${lan.activeUploads}` : lan.pairedDevices) : ""}
+      </span>
+    </button>
+    <button
+      class="flex items-center border-l border-line px-3 text-ink-2 hover:bg-raised hover:text-ink"
+      onclick={() => catalog.openSettings("cloud")}
+      title="Ayarlar"
+      aria-label="Ayarlar"
+    >
+      <SlidersHorizontal size={14} strokeWidth={1.5} />
+    </button>
+    <button
+      class="data flex items-center gap-1 border-l border-line px-3 text-2xs whitespace-nowrap text-ink-3 hover:bg-raised hover:text-ink"
+      onclick={() => (catalog.overlay = "palette")}
+      title="Komut paleti"
+      aria-label="Komut paleti"
+    >
+      <CommandIcon size={12} strokeWidth={1.5} />{mac ? "⌘K" : "Ctrl+K"}
+    </button>
   </div>
 </nav>

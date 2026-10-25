@@ -66,6 +66,9 @@ dizesi çözümlemede yok sayılır) 400 ms'den başlayıp ikiye katlanan aralı
 
 ## 2. Bu adımdaki bilinçli sınırlamalar
 
+> Adım 3B bu sınırlamaların hepsini kaldırdı (favori yalnızca JSON'da kalır);
+> bkz. [RFC-001F](RFC-001F-arayuz-motor-baglantisi.md).
+
 - **Sırlar dosyada.** Secret Service (GNOME Keyring/KWallet) entegrasyonu 3B'ye
   kaldı. Bu arada `FileSecretStore` kullanılır: `0700` dizin, `0600` dosyalar,
   doğrulanmış anahtar adları. Bulut kimlik bilgileri ve age cihaz anahtarı yoksa

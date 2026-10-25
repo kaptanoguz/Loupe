@@ -24,6 +24,11 @@
     retryTimer = setTimeout(() => (attempt += 1), THUMB_RETRY_MS * 2 ** attempt);
   }
 
+  // 1:1'de tam çözünürlük (thumb://orig) arka planda yüklenir; gelene dek lg
+  // ekranda kalır, gelince aynı nokta merkezde kalacak şekilde değiştirilir.
+  let orig = $state.raw<{ id: number; src: string; w: number; h: number } | null>(null);
+  let origFailed = $state(false);
+
   let stage = $state<HTMLDivElement>();
   let stageW = $state(0);
   let stageH = $state(0);
@@ -33,19 +38,45 @@
   let drag: { x: number; y: number; px: number; py: number; moved: boolean } | null = null;
 
   const dpr = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
-  /** 1:1 = önizlemenin her pikseli bir ekran pikseli. */
-  const actual = $derived({ w: natural.w / dpr, h: natural.h / dpr });
+  const full = $derived(orig && orig.id === item?.id ? orig : null);
+  /** 1:1 = görüntünün her pikseli bir ekran pikseli (tam çözünürlük geldiyse onun). */
+  const actual = $derived(full ? { w: full.w / dpr, h: full.h / dpr } : { w: natural.w / dpr, h: natural.h / dpr });
   const fitScale = $derived(
-    natural.w > 0 && stageW > 0 ? Math.min(stageW / actual.w, stageH / actual.h) : 1,
+    natural.w > 0 && stageW > 0 ? Math.min((stageW * dpr) / natural.w, (stageH * dpr) / natural.h) : 1,
   );
-  const percent = $derived(Math.round((catalog.loupeActual ? 1 : fitScale) * 100));
+  const percent = $derived(
+    Math.round((catalog.loupeActual ? 1 : full ? (fitScale * natural.w) / full.w : fitScale) * 100),
+  );
 
   // Öğe değişince kaydırma ve yeniden deneme sıfırlanır.
   $effect(() => {
     void item?.id;
     pan = { x: 0, y: 0 };
     attempt = 0;
+    origFailed = false;
     return () => clearTimeout(retryTimer);
+  });
+
+  $effect(() => {
+    const it = item;
+    if (!catalog.loupeActual || !it || natural.w === 0 || (orig && orig.id === it.id)) return;
+    const src = catalog.backend.thumbUrl("orig", it.hash);
+    const img = new Image();
+    img.decoding = "async";
+    img.onload = () => {
+      if (catalog.selectedItem?.id !== it.id) return;
+      // Kaydırma lg piksellerindeydi: aynı noktayı korumak için ölçeklenir.
+      const k = img.naturalWidth / Math.max(1, natural.w);
+      orig = { id: it.id, src, w: img.naturalWidth, h: img.naturalHeight };
+      pan = clampPan(pan.x * k, pan.y * k);
+    };
+    // Kütüphane çevrimdışı, desteklenmeyen biçim: lg ile devam edilir.
+    img.onerror = () => (origFailed = true);
+    img.src = src;
+    return () => {
+      img.onload = null;
+      img.onerror = null;
+    };
   });
 
   function clampPan(x: number, y: number): { x: number; y: number } {
@@ -82,7 +113,8 @@
       const r = stage.getBoundingClientRect();
       const cx = e.clientX - r.left - r.width / 2;
       const cy = e.clientY - r.top - r.height / 2;
-      const k = 1 / fitScale;
+      // Sığdırılmış görüntüden 1:1'e büyüme oranı (tam çözünürlük önbellekteyse ona göre).
+      const k = actual.w / ((natural.w / dpr) * fitScale);
       catalog.loupeActual = true;
       pan = clampPan(-cx * k + cx, -cy * k + cy);
     } else {
@@ -116,10 +148,10 @@
       {/if}
       {#if catalog.loupeActual && natural.w > 0}
         <img
-          src={high}
+          src={full ? full.src : high}
           alt=""
-          {onload}
-          {onerror}
+          onload={full ? undefined : onload}
+          onerror={full ? undefined : onerror}
           draggable="false"
           class="absolute top-1/2 left-1/2 max-w-none"
           style:width="{actual.w}px"
@@ -148,6 +180,9 @@
     </span>
     <span>
       <span class={catalog.loupeActual ? "text-amber" : ""}>{catalog.loupeActual ? "1:1" : "sığdır"}</span>
+      {#if catalog.loupeActual}
+        · {full ? `${full.w}×${full.h}` : origFailed ? "önizleme (özgün açılamadı)" : "özgün yükleniyor"}
+      {/if}
       · {percent}% · Z yakınlaştır · Esc kapat
     </span>
   </div>

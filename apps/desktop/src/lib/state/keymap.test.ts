@@ -54,6 +54,9 @@ describe("keyToAction", () => {
     expect(keyToAction({ key: "=", ctrlKey: true }, grid)).toEqual({ type: "zoom", delta: 1 });
     expect(keyToAction({ key: "-", ctrlKey: true }, grid)).toEqual({ type: "zoom", delta: -1 });
     expect(keyToAction({ key: "1", ctrlKey: true }, grid)).toBeNull();
+    expect(keyToAction({ key: "k", ctrlKey: true }, grid)).toEqual({ type: "palette" });
+    expect(keyToAction({ key: "k", metaKey: true }, grid)).toEqual({ type: "palette" });
+    expect(keyToAction({ key: "k" }, grid)).toBeNull();
     expect(keyToAction({ key: "f", altKey: true }, grid)).toBeNull();
     expect(keyToAction({ key: "q" }, grid)).toBeNull();
   });

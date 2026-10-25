@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { bytes, count } from "../format";
+  import { bytes, clock, count, rate } from "../format";
   import type { Catalog } from "../state/catalog.svelte";
 
   interface Props {
@@ -19,15 +19,28 @@
   });
   const lan = $derived.by(() => {
     if (!st) return null;
-    switch (st.lan.state) {
+    const l = st.lan;
+    switch (l.state) {
       case "listening":
-        return `LAN :${st.lan.port ?? "?"}${st.lan.activeUploads > 0 ? ` ↑${st.lan.activeUploads}` : ""}`;
+        if (l.activeUploads > 0) {
+          const eta = l.etaSecs !== null ? ` · ${clock(l.etaSecs)}` : "";
+          return `Wi-Fi ↓${l.activeUploads} ${rate(l.bytesPerSec)}${eta} · ✓${count(l.verifiedFiles)}`;
+        }
+        return `Wi-Fi :${l.port ?? "?"}${l.verifiedFiles > 0 ? ` · ✓${count(l.verifiedFiles)}` : ""}`;
       case "error":
-        return "LAN hata";
+        return "Wi-Fi hata";
       default:
         return null;
     }
   });
+  const ai = $derived.by(() => {
+    const a = st?.ai;
+    if (!a || a.mode === "off") return null;
+    const pending = a.pending.faces + a.pending.clip + a.pending.clustering;
+    if (a.paused) return { text: "AI duraklatıldı", warn: true };
+    return pending > 0 ? { text: `AI ${count(pending)}`, warn: false } : null;
+  });
+  const uploading = $derived(st?.cloud.filter((c) => c.state === "uploading") ?? []);
 </script>
 
 <footer class="statusbar flex shrink-0 items-center gap-4" aria-label="Durum">
@@ -41,9 +54,23 @@
     disk {bytes(st?.freeBytes)} boş{st && st.librariesOffline > 0 ? ` · ${st.librariesOffline} çevrimdışı` : ""}
   </span>
   {#if st && st.importsActive > 0}<span class="text-amber">içe aktarma {st.importsActive}</span>{/if}
-  {#if lan}<span>{lan}</span>{/if}
+  {#if lan}<span class={st && st.lan.activeUploads > 0 ? "text-ink" : ""}>{lan}</span>{/if}
+  {#if uploading.length > 0}
+    <span>bulut ↑{count(uploading.reduce((n, c) => n + c.pending, 0))}</span>
+  {/if}
+  {#if st && st.verifying > 0}<span class="text-amber">doğrulanıyor</span>{/if}
+  {#if ai}
+    <button
+      class={ai.warn ? "text-amber" : ""}
+      onclick={() => catalog.openSettings("ai")}
+      title="Yapay zekâ analizi">{ai.text}</button
+    >
+  {/if}
   <span class="min-w-0 flex-1 truncate text-right text-ink">
-    {#if catalog.error}<span class="text-amber" title={catalog.error}>{catalog.error}</span>{:else}{selection}{/if}
+    {#if catalog.error}<span class="text-amber" title={catalog.error}>{catalog.error}</span>{:else if catalog.notice}<span
+        class="text-ink"
+        role="status">{catalog.notice}</span
+      >{:else}{selection}{/if}
   </span>
   <span class="text-ink-3" title="Son düzen hesabı">{catalog.layoutMs.toFixed(1)} ms</span>
 </footer>

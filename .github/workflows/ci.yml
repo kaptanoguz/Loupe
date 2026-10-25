@@ -26,6 +26,8 @@ jobs:
       # Gerçek ONNX modelleri: ONNX Runtime dlopen ile yüklenir, derlemede ikili indirilmez.
       - run: cargo clippy -p loupe-ai --features ort --all-targets --locked -- -D warnings
       - run: cargo test -p loupe-ai --features ort --lib --locked
+      # Uygulama katmanının ONNX yolu (AiMode::Onnx) da derlenir ve lint'lenir.
+      - run: cargo clippy -p loupe-app --features ort --all-targets --locked -- -D warnings
       # İsteğe bağlı libvips arka ucu ve kayıpsız (saf Rust) WebP yolu.
       - run: sudo apt-get install -y --no-install-recommends libvips-tools
       - run: cargo test -p loupe-media --features vips --locked
