@@ -33,5 +33,8 @@ pub const LOUPE_DIR: &str = ".loupe";
 /// Atomik yazmaların geçici dizini. Hedefle aynı dosya sisteminde olmalı ki
 /// son adım bir `rename` olsun.
 pub const TMP_DIR: &str = ".loupe-tmp";
+/// `.loupe/` altında LAN (tus) yüklemelerinin yarım dosyaları. Yeniden
+/// başlatmada silinmez: telefon kaldığı bayttan devam eder.
+pub const LAN_STAGING_DIR: &str = "lan-staging";
 
 pub type Result<T, E = StorageError> = std::result::Result<T, E>;

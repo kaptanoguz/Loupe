@@ -36,6 +36,7 @@ pub const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../migrations/0004_thumb_sizes_job_claim.sql"),
     },
     Migration { version: 5, name: "0005_ml_state", sql: include_str!("../migrations/0005_ml_state.sql") },
+    Migration { version: 6, name: "0006_lan_cloud_local", sql: include_str!("../migrations/0006_lan_cloud_local.sql") },
 ];
 
 /// Migrasyonlardan sonra var olması gereken tablolar (sanal tablolar dahil).

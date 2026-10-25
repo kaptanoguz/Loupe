@@ -1,0 +1,46 @@
+[package]
+name = "loupe-lan"
+description = "Loupe Wi-Fi senkronizasyonu: mDNS keşfi, dinamik QR eşleşme + mTLS, tus 1.0 devam edebilir yükleme, çakışma politikası"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["mdns"]
+# Gerçek ağda mDNS/ZeroConf duyurusu. Testler bellek içi keşif kullanır.
+mdns = ["dep:mdns-sd"]
+
+[dependencies]
+axum.workspace = true
+base64.workspace = true
+blake3.workspace = true
+bytes.workspace = true
+form_urlencoded.workspace = true
+futures-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+loupe-core.workspace = true
+loupe-db.workspace = true
+loupe-storage.workspace = true
+mdns-sd = { workspace = true, optional = true }
+rand.workspace = true
+rcgen.workspace = true
+rusqlite.workspace = true
+rustls.workspace = true
+rustls-pki-types.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+time.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+
+[dev-dependencies]
+image.workspace = true
+reqwest = { workspace = true, features = ["json"] }
+tempfile.workspace = true
+
+[lints]
+workspace = true
