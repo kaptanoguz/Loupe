@@ -53,6 +53,9 @@ check "app.css dışında hex renk" \
   '#[0-9a-fA-F]{3,8}\b' --exclude="$token_file"
 check "keyfi renk sınıfı (bg-[#…], text-[rgb…])" \
   '\b(bg|text|border|fill|stroke|outline|ring)-\[(#|rgb|hsl|oklch)'
+# Daire yok: avatarlar ve göstergeler kare (SVG daire veya %50 yarıçap)
+check "daire (<circle>, border-radius: 50%)" \
+  '<circle\b|border-radius\s*:\s*50%'
 # Serif ve jenerik karşılama metinleri
 check "serif yazı tipi" '\bfont-serif\b'
 check "jenerik karşılama metni" 'Hoş geldiniz|Welcome to Loupe|Get started'

@@ -12,7 +12,14 @@ jobs:
       - uses: actions/checkout@v4
       # Sürüm rust-toolchain.toml'dan gelir; yerel ve CI aynı clippy'yi kullanır.
       - run: rustup show active-toolchain
+      # Tauri v2 masaüstü kabuğu (WebKitGTK 4.1) için sistem kütüphaneleri.
+      - run: >
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev
+          librsvg2-dev libayatana-appindicator3-dev
       - uses: Swatinem/rust-cache@v2
+      # generate_context! frontendDist klasörünün var olmasını bekler; arayüz ayrı işte derlenir.
+      - run: mkdir -p apps/desktop/dist
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
@@ -20,12 +27,29 @@ jobs:
       - run: cargo clippy -p loupe-ai --features ort --all-targets --locked -- -D warnings
       - run: cargo test -p loupe-ai --features ort --lib --locked
       # İsteğe bağlı libvips arka ucu ve kayıpsız (saf Rust) WebP yolu.
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvips-tools
+      - run: sudo apt-get install -y --no-install-recommends libvips-tools
       - run: cargo test -p loupe-media --features vips --locked
       - run: cargo test -p loupe-media --no-default-features --locked
       # mDNS olmadan (yalnızca bellek içi keşif) da derlenmeli.
       - run: cargo clippy -p loupe-lan --no-default-features --all-targets --locked -- -D warnings
       - run: cargo test -p loupe-lan --no-default-features --locked
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
 
   schema:
     runs-on: ubuntu-latest

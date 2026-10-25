@@ -34,6 +34,8 @@ pub struct SidecarData {
     pub rating: Option<u8>,
     pub color_label: Option<ColorLabel>,
     pub tags: Vec<String>,
+    /// Favori. XMP'de standart karşılığı yok; yalnızca `.loupe.json`'a yazılır.
+    pub favorite: Option<bool>,
 }
 
 /// Bir medya dosyasının sidecar çifti.
@@ -97,6 +99,7 @@ impl Sidecar {
                     rating: j.rating.or(x.rating),
                     color_label: j.color_label.or(x.color_label),
                     tags: j.tags.unwrap_or(x.tags),
+                    favorite: j.favorite,
                 })
             }
         })
@@ -129,6 +132,7 @@ impl Sidecar {
         doc.rating = data.rating;
         doc.color_label = data.color_label.map(|c| c.as_str().to_owned());
         doc.tags = Some(data.tags.clone());
+        doc.favorite = data.favorite;
         let mut json = serde_json::to_vec_pretty(&doc).map_err(|e| MediaError::Encode(e.to_string()))?;
         json.push(b'\n');
         write_atomic(&json_path, &json)
@@ -157,6 +161,8 @@ struct JsonSidecar {
     color_label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     tags: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    favorite: Option<bool>,
     /// İleride eklenecek alanlar (düzenleme yığını vb.) okunup aynen yazılır.
     #[serde(flatten)]
     extra: serde_json::Map<String, serde_json::Value>,
@@ -166,6 +172,7 @@ struct JsonFields {
     rating: Option<u8>,
     color_label: Option<ColorLabel>,
     tags: Option<Vec<String>>,
+    favorite: Option<bool>,
 }
 
 fn parse_json(bytes: &[u8]) -> Result<JsonFields, String> {
@@ -176,7 +183,7 @@ fn parse_json(bytes: &[u8]) -> Result<JsonFields, String> {
     let rating = doc.rating.map(|r| check_rating(i64::from(r))).transpose()?;
     let color_label =
         doc.color_label.as_deref().map(|s| ColorLabel::from_str(s).map_err(|e| e.to_string())).transpose()?;
-    Ok(JsonFields { rating, color_label, tags: doc.tags })
+    Ok(JsonFields { rating, color_label, tags: doc.tags, favorite: doc.favorite })
 }
 
 fn check_rating(r: i64) -> Result<u8, String> {
@@ -543,6 +550,7 @@ mod tests {
             rating: Some(5),
             color_label: Some(ColorLabel::Red),
             tags: vec!["İstanbul".into(), "a<b".into()],
+            favorite: None,
         };
         let out = update_xmp(Some(DARKTABLE.as_bytes()), &data).unwrap();
         let text = String::from_utf8(out.clone()).unwrap();
@@ -558,7 +566,7 @@ mod tests {
 
     #[test]
     fn fresh_template_round_trip() {
-        let data = SidecarData { rating: Some(0), color_label: None, tags: vec![] };
+        let data = SidecarData { rating: Some(0), color_label: None, tags: vec![], favorite: None };
         let out = update_xmp(None, &data).unwrap();
         assert_eq!(parse_xmp(&out).unwrap(), data);
     }

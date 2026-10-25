@@ -158,6 +158,19 @@ impl LanServer {
         clock: Arc<dyn Clock>,
         approver: Arc<dyn PairingApprover>,
     ) -> Result<Self, LanError> {
+        Self::start_shared(cfg, pool, identity, Arc::new(Mutex::new(importer)), clock, approver).await
+    }
+
+    /// Kütüphane kilidini tutan importer'ı uygulamanın kendi içe aktarmasıyla
+    /// paylaşır (aynı kütüphaneye ikinci `Importer::open` kilit hatası verir).
+    pub async fn start_shared(
+        cfg: LanConfig,
+        pool: Arc<Pool>,
+        identity: ServerIdentity,
+        importer: Arc<Mutex<Importer>>,
+        clock: Arc<dyn Clock>,
+        approver: Arc<dyn PairingApprover>,
+    ) -> Result<Self, LanError> {
         let registry = Arc::new(DeviceRegistry::default());
         let now = clock.now_ms();
         let p = pool.clone();
@@ -167,7 +180,7 @@ impl LanServer {
         let telemetry = Arc::new(Telemetry::new());
         let uploads = Arc::new(UploadService::new(
             pool.clone(),
-            Arc::new(Mutex::new(importer)),
+            importer,
             cfg.library_id,
             telemetry.clone(),
             clock.clone(),

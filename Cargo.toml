@@ -10,6 +10,8 @@ members = [
     "crates/loupe-search",
     "crates/loupe-lan",
     "crates/loupe-cloud",
+    "crates/loupe-app",
+    "apps/desktop/src-tauri",
 ]
 
 [workspace.package]
@@ -28,6 +30,7 @@ loupe-ai = { path = "crates/loupe-ai" }
 loupe-search = { path = "crates/loupe-search" }
 loupe-lan = { path = "crates/loupe-lan" }
 loupe-cloud = { path = "crates/loupe-cloud" }
+loupe-app = { path = "crates/loupe-app" }
 
 age = { version = "0.11", default-features = false }
 async-trait = "0.1"

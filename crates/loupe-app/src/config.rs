@@ -1,0 +1,88 @@
+//! Uygulama dizinleri ve açılış ayarları.
+
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use loupe_jobs::WorkerConfig;
+use loupe_storage::volume::VolumeProbe;
+
+use crate::{AppError, AppResult};
+
+#[derive(Debug, Clone)]
+pub struct AppConfig {
+    /// `catalog.db`, `lan/identity.json`, `geonames/` (XDG_DATA_HOME/loupe).
+    pub data_dir: PathBuf,
+    /// Küçük resim önbelleği `thumbs/` (XDG_CACHE_HOME/loupe).
+    pub cache_dir: PathBuf,
+    /// mDNS örnek adı ve LAN sertifikasının CN'i.
+    pub device_name: String,
+    /// `None`: işçi havuzu başlatılmaz (testler kuyruğu elle çalıştırır).
+    pub workers: Option<WorkerConfig>,
+    /// Çevrimiçi kütüphaneleri inotify ile izle.
+    pub watch: bool,
+    pub watch_debounce: Duration,
+    pub volume_probe: VolumeProbe,
+}
+
+impl AppConfig {
+    /// Gerçek kurulum: XDG dizinleri.
+    pub fn from_env() -> AppResult<Self> {
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        let xdg = |var: &str, fallback: &str| -> AppResult<PathBuf> {
+            std::env::var_os(var)
+                .map(PathBuf::from)
+                .filter(|p| p.is_absolute())
+                .or_else(|| home.as_ref().map(|h| h.join(fallback)))
+                .map(|p| p.join("loupe"))
+                .ok_or_else(|| AppError::Invalid(format!("{var} ve HOME tanımsız")))
+        };
+        let device_name = std::fs::read_to_string("/etc/hostname")
+            .ok()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "Loupe".to_owned());
+        Ok(Self {
+            data_dir: xdg("XDG_DATA_HOME", ".local/share")?,
+            cache_dir: xdg("XDG_CACHE_HOME", ".cache")?,
+            device_name,
+            workers: Some(WorkerConfig::default()),
+            watch: true,
+            watch_debounce: Duration::from_secs(2),
+            volume_probe: VolumeProbe::default(),
+        })
+    }
+
+    /// Testler: her şey tek dizinde, işçi ve izleyici kapalı.
+    #[must_use]
+    pub fn in_dir(dir: &Path) -> Self {
+        Self {
+            data_dir: dir.join("data"),
+            cache_dir: dir.join("cache"),
+            device_name: "Loupe Test".to_owned(),
+            workers: None,
+            watch: false,
+            watch_debounce: Duration::from_millis(200),
+            volume_probe: VolumeProbe::default(),
+        }
+    }
+
+    #[must_use]
+    pub fn catalog_path(&self) -> PathBuf {
+        self.data_dir.join("catalog.db")
+    }
+
+    #[must_use]
+    pub fn thumbs_dir(&self) -> PathBuf {
+        self.cache_dir.join("thumbs")
+    }
+
+    #[must_use]
+    pub fn lan_identity_path(&self) -> PathBuf {
+        self.data_dir.join("lan").join("identity.json")
+    }
+
+    #[must_use]
+    pub fn geonames_dir(&self) -> PathBuf {
+        self.data_dir.join("geonames")
+    }
+}

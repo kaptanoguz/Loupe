@@ -144,6 +144,8 @@ mod mdns {
                 props.as_slice(),
             )
             .map_err(err)?;
+            // Adres verilmediyse arayüzlerin adresleri otomatik eklenir (DHCP değişse de güncel kalır).
+            let info = if ad.addrs.is_empty() { info.enable_addr_auto() } else { info };
             self.daemon.register(info).map_err(err)
         }
 

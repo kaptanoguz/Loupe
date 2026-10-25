@@ -300,7 +300,12 @@ fn sidecars_round_trip_without_touching_the_original() {
 
     let sc = Sidecar::for_media(&raw);
     assert_eq!(sc.read().unwrap(), None);
-    let data = SidecarData { rating: Some(4), color_label: Some(ColorLabel::Blue), tags: vec!["Kapadokya".into()] };
+    let data = SidecarData {
+        rating: Some(4),
+        color_label: Some(ColorLabel::Blue),
+        tags: vec!["Kapadokya".into()],
+        favorite: Some(true),
+    };
     sc.write(&data).unwrap();
     assert_eq!(sc.xmp_path(), dir.path().join("IMG_0001.CR2.xmp"));
     assert_eq!(sc.read().unwrap(), Some(data.clone()));
@@ -314,6 +319,7 @@ fn sidecars_round_trip_without_touching_the_original() {
     sc.write(&SidecarData { rating: Some(1), ..data }).unwrap();
     let v: serde_json::Value = serde_json::from_slice(&std::fs::read(&json_path).unwrap()).unwrap();
     assert_eq!(v["rating"], 1);
+    assert_eq!(v["favorite"], true);
     assert_eq!(v["edits"][0]["op"], "crop");
 }
 
@@ -334,7 +340,7 @@ fn lightroom_style_xmp_is_found_and_updated_in_place() {
     let sc = Sidecar::for_media(&raw);
     assert_eq!(sc.read().unwrap().unwrap().rating, Some(3));
     assert_eq!(sc.xmp_path(), lr);
-    sc.write(&SidecarData { rating: Some(5), color_label: None, tags: vec![] }).unwrap();
+    sc.write(&SidecarData { rating: Some(5), color_label: None, tags: vec![], favorite: None }).unwrap();
     let text = std::fs::read_to_string(&lr).unwrap();
     assert!(text.contains("crs:Exposure2012=\"+0.35\""), "{text}");
     assert!(!dir.path().join("DSC_0412.NEF.xmp").exists());
