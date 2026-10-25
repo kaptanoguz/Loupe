@@ -89,6 +89,7 @@ pub struct AppCore {
     protocol: ThumbProtocol,
     full: FullRes,
     ai: AiRuntime,
+    models: crate::models::Models,
     search: loupe_search::SearchEngine,
     ranks: RankCache,
     recovery: Recovery,
@@ -139,6 +140,7 @@ impl AppCore {
 
         let full = FullRes::new(pool.clone(), libraries.clone(), cfg.full_dir());
         let ai = AiRuntime::open(cfg.ai.clone());
+        let models = crate::models::Models::new(cfg.data_dir.join("models"))?;
         let search = match &ai.engine {
             Some(e) => loupe_search::SearchEngine::new(pool.clone(), e.clip_text.clone()),
             None => loupe_search::SearchEngine::keyword_only(pool.clone()),
@@ -154,6 +156,7 @@ impl AppCore {
             protocol,
             full,
             ai,
+            models,
             search,
             ranks: RankCache::default(),
             recovery: Recovery::default(),
@@ -511,6 +514,28 @@ impl AppCore {
             clip_done,
             images,
         })
+    }
+
+    /// Model dosyalarının durumu ve süren indirme.
+    pub fn models_status(&self) -> AppResult<crate::models::ModelsDto> {
+        self.models.status(self.ai.active() && self.ai.mode.kind() == "onnx")
+    }
+
+    /// Eksik ya da bozuk modelleri arka planda indirir (tokio çalışma zamanı içinde çağrılır).
+    pub fn models_install(&self) -> AppResult<crate::models::ModelsDto> {
+        self.models.install()?;
+        self.models_status()
+    }
+
+    pub fn models_cancel(&self) -> AppResult<crate::models::ModelsDto> {
+        self.models.cancel();
+        self.models_status()
+    }
+
+    /// Testler: indiriciyi ve manifesti dışarıdan verir.
+    #[must_use]
+    pub const fn models(&self) -> &crate::models::Models {
+        &self.models
     }
 
     /// Arka plan işlerini duraklatır/sürdürür (görünen küçük resimler durmaz).

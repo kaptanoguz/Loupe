@@ -23,6 +23,19 @@ pub enum AiError {
     #[error("{entity} {id} bulunamadı")]
     NotFound { entity: &'static str, id: i64 },
 
+    #[error("dosya işlemi: {0}")]
+    Io(String),
+
+    #[error("indirme başarısız ({url}): {reason}")]
+    Download { url: String, reason: String },
+
+    /// İndirilen ya da diskteki dosya manifestteki boyut/özetle tutmuyor.
+    #[error("doğrulama başarısız ({file}): beklenen {expected}, gelen {actual}")]
+    Verify { file: String, expected: String, actual: String },
+
+    #[error("iptal edildi")]
+    Cancelled,
+
     #[error("iç kilit zehirlendi")]
     Poisoned,
 }

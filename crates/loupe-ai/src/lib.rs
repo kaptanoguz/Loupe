@@ -12,6 +12,8 @@
 //! - [`clip`]: `vec_media_clip` yazma ve anlamsal benzerlik.
 //! - [`events`]: zaman + konum tabanlı etkinlik algılama; kullanıcının
 //!   dokunduğu etkinlikler asla ezilmez.
+//! - [`models`] / [`fetch`]: model manifesti, SHA-256 doğrulaması ve atomik
+//!   indirme (`loupe-models` CLI ve Ayarlar → Yapay Zekâ).
 //! - [`jobs`]: `face_detect`, `clip_embed`, `cluster_faces`, `cluster_events`
 //!   iş işleyicisi.
 
@@ -21,10 +23,12 @@ pub mod engine;
 pub mod error;
 pub mod events;
 pub mod faces;
+pub mod fetch;
 pub mod jobs;
 pub mod lifecycle;
 pub mod mock;
 pub mod model;
+pub mod models;
 #[cfg(feature = "ort")]
 pub mod onnx;
 

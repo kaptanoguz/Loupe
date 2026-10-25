@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Loupe · Wi-Fi aktarım</title>
+    <link rel="icon" href="/m/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/m/app.css" />
+    <script type="module" src="/m/app.js"></script>
+  </head>
+  <body>
+    <header class="bar">
+      <img class="logo" src="/m/icon.svg" alt="" width="20" height="20" />
+      <span class="brand">Loupe</span>
+      <span id="server" class="mono dim truncate"></span>
+    </header>
+
+    <main>
+      <section id="view-pairing" class="panel">
+        <p id="pairing-text" class="lead">Bağlanıyor…</p>
+        <p id="pairing-hint" class="hint" hidden>
+          Masaüstünde Loupe → <span class="mono">Telefon</span> penceresindeki QR kodu telefon kamerasıyla tarayın.
+          Kod tek kullanımlıktır ve 60 saniyede yenilenir.
+        </p>
+      </section>
+
+      <section id="view-ready" class="panel" hidden>
+        <label class="btn btn-primary pick">
+          <input id="files" type="file" multiple accept="image/*,video/*" />
+          Fotoğraf / Video Seç
+        </label>
+        <p class="hint">
+          Seçtiğiniz dosyalar bu ağdaki masaüstüne doğrudan gider; internete çıkmaz. Daha önce aktarılanlar atlanır.
+          Aktarım sürerken ekranı açık tutun.
+        </p>
+
+        <dl class="stats mono" aria-label="Aktarım">
+          <div><dt>Hız</dt><dd id="s-rate">—</dd></div>
+          <div><dt>Kalan</dt><dd id="s-eta">—</dd></div>
+          <div><dt>Aktarıldı</dt><dd id="s-done">0</dd></div>
+          <div><dt>Atlandı</dt><dd id="s-skipped">0</dd></div>
+        </dl>
+
+        <div class="progress" role="progressbar" aria-label="Toplam ilerleme" aria-valuemin="0" aria-valuemax="100">
+          <div id="bar"></div>
+        </div>
+        <div class="row mono small">
+          <span id="s-bytes" class="dim">—</span>
+          <span id="s-failed" class="amber" hidden></span>
+        </div>
+        <p id="current" class="mono small truncate"></p>
+
+        <div class="row">
+          <button id="stop" class="btn" type="button" hidden>Durdur</button>
+          <button id="resume" class="btn" type="button" hidden>Sürdür</button>
+        </div>
+
+        <ol id="list" class="list mono small" aria-label="Dosyalar"></ol>
+      </section>
+    </main>
+
+    <dialog id="conflict" aria-labelledby="conflict-title">
+      <form method="dialog">
+        <h2 id="conflict-title">Bu dosya daha önce aktarıldı ve değişmiş</h2>
+        <p id="conflict-name" class="mono small truncate"></p>
+        <p class="hint">Telefonda düzenlenmiş görünüyor. Masaüstündeki kopya ile ne yapılsın?</p>
+        <label class="check"><input id="conflict-all" type="checkbox" /> Kalan çakışmalara da uygula</label>
+        <div class="choices">
+          <button class="btn btn-primary" value="keep_both">İkisini de tut</button>
+          <button class="btn" value="replace_with_newer">Yeniyle değiştir</button>
+          <button class="btn" value="skip">Atla</button>
+        </div>
+      </form>
+    </dialog>
+  </body>
+</html>

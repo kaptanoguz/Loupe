@@ -55,6 +55,43 @@ pub fn insert_device(
     Ok(conn.last_insert_rowid())
 }
 
+/// Tarayıcıdan eşleşen cihaz (`kind = 'web'`): kimlik, oturum anahtarının
+/// parmak izidir ([`crate::web::session_fingerprint`]); anahtar saklanmaz.
+pub fn insert_web_device(
+    conn: &Connection,
+    name: &str,
+    platform: &str,
+    fingerprint: &[u8; 32],
+    library: LibraryId,
+    now_ms: i64,
+    expires_at_ms: i64,
+) -> Result<i64, LanError> {
+    let mut serial = [0u8; 16];
+    rand::RngCore::fill_bytes(&mut rand::rng(), &mut serial);
+    conn.execute(
+        "INSERT INTO devices (name, platform, cert_sha256, spki_sha256, cert_serial, cert_not_after,
+                              target_library_id, paired_at, kind)
+         VALUES (?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, 'web')",
+        params![name, platform, fingerprint.as_slice(), serial.as_slice(), expires_at_ms, library.0, now_ms],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Ön kontrol: bu cihazdan aynı kimlik ve aynı değişiklik zamanıyla daha önce
+/// görülmüş (aktarılmış ya da "atla" denmiş) varlıklar.
+pub fn known_assets(conn: &Connection, device_id: i64, items: &[(String, i64)]) -> Result<Vec<String>, LanError> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT 1 FROM device_assets WHERE device_id = ?1 AND client_asset_id = ?2 AND client_modified_at = ?3",
+    )?;
+    let mut out = Vec::new();
+    for (id, modified) in items {
+        if stmt.exists(params![device_id, id, modified])? {
+            out.push(id.clone());
+        }
+    }
+    Ok(out)
+}
+
 pub fn device(conn: &Connection, id: i64) -> Result<Option<Device>, LanError> {
     let row = conn
         .query_row(

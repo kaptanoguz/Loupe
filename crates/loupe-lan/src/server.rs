@@ -9,6 +9,10 @@
 //! | `HEAD /files/{id}` | mTLS | `Upload-Offset` |
 //! | `PATCH /files/{id}` | mTLS | parça yaz |
 //! | `DELETE /files/{id}` | mTLS | tus termination |
+//! | `GET /m…`, `/m/session`, `/m/precheck` | tarayıcı oturumu | telefon sayfası ([`crate::web`]) |
+//!
+//! `/manifest` ve `/files…` eşleşmiş tarayıcının oturum anahtarını da kabul
+//! eder (`Authorization: Bearer` ya da `loupe_s` çerezi).
 //!
 //! Sunucu yalnızca LAN adreslerinden (RFC1918, ULA, link-local, loopback)
 //! bağlantı kabul eder; diğerleri TLS'ten önce kapatılır.
@@ -23,7 +27,7 @@ use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Extension, Json, Router};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
@@ -41,6 +45,7 @@ use tokio_rustls::TlsAcceptor;
 use crate::identity::sha256;
 use crate::store::{self, Device, write_tx};
 use crate::tus::{CreateOutcome, ManifestEntry, ManifestItem, UploadMeta, UploadService};
+use crate::web::{self, PrecheckItem, PrecheckResponse, WebPairRequest, WebSession};
 use crate::{
     Clock, DeviceRegistry, LanError, PairingManager, PairingPayload, ServerIdentity, Telemetry, server_config,
 };
@@ -296,7 +301,16 @@ struct PeerCert {
 }
 
 fn router(state: AppState) -> Router {
-    Router::new()
+    let mut r = Router::new();
+    for (path, _, _) in web::ASSETS {
+        r = r.route(
+            path,
+            get(move || async move { web::asset(path).unwrap_or_else(|| StatusCode::NOT_FOUND.into_response()) }),
+        );
+    }
+    r.route("/", get(|| async { (StatusCode::SEE_OTHER, [(header::LOCATION, "/m")]).into_response() }))
+        .route("/m/session", post(web_pair).get(web_whoami))
+        .route("/m/precheck", post(web_precheck))
         .route("/pair", post(pair))
         .route("/manifest", post(manifest))
         .route("/files", post(create).options(options_files))
@@ -346,9 +360,14 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, LanError> + S
     tokio::task::spawn_blocking(f).await?
 }
 
-/// mTLS ile gelen, kayıtlı ve iptal edilmemiş cihaz.
-async fn authed(st: &AppState, pc: &PeerCert) -> Result<Device, LanError> {
-    let id = pc.cert_sha256.and_then(|s| st.0.registry.lookup(&s)).ok_or(LanError::Unauthorized)?;
+/// Kayıtlı ve iptal edilmemiş cihaz: mTLS istemci sertifikası ya da (sertifika
+/// yoksa) tarayıcı oturum anahtarı.
+async fn authed(st: &AppState, pc: &PeerCert, headers: &HeaderMap) -> Result<Device, LanError> {
+    let fingerprint = match pc.cert_sha256 {
+        Some(c) => Some(c),
+        None => web::session_key(headers).map(web::session_fingerprint),
+    };
+    let id = fingerprint.and_then(|s| st.0.registry.lookup(&s)).ok_or(LanError::Unauthorized)?;
     let (pool, now, addr) = (st.0.pool.clone(), st.0.clock.now_ms(), pc.addr.ip().to_string());
     let device = blocking(move || {
         let d = pool.read(|c| Ok(store::device(c, id)))??;
@@ -426,11 +445,87 @@ async fn pair(
 async fn manifest(
     State(st): State<AppState>,
     Extension(pc): Extension<PeerCert>,
+    headers: HeaderMap,
     Json(items): Json<Vec<ManifestItem>>,
 ) -> ApiResult {
-    let device = authed(&st, &pc).await?;
+    let device = authed(&st, &pc, &headers).await?;
     let out: Vec<ManifestEntry> = st.0.uploads.manifest(&device, items).await?;
     Ok(Json(out).into_response())
+}
+
+/// Tarayıcı eşleşmesi: QR belirteci → oturum anahtarı (yanıtta ve çerezde).
+async fn web_pair(
+    State(st): State<AppState>,
+    Extension(pc): Extension<PeerCert>,
+    Json(req): Json<WebPairRequest>,
+) -> ApiResult {
+    let s = &st.0;
+    if !s.pairing.allow_attempt(pc.addr.ip()) {
+        return Err(LanError::RateLimited.into());
+    }
+    s.pairing.redeem(&req.token)?;
+    let name = req.device_name.trim().to_owned();
+    if name.is_empty() || name.chars().count() > 80 || !matches!(req.platform.as_str(), "android" | "ios" | "desktop") {
+        return Err(LanError::PairingFailed.into());
+    }
+    let info = PairingRequestInfo { device_name: name.clone(), platform: req.platform.clone(), addr: pc.addr };
+    let approved = tokio::time::timeout(APPROVAL_TIMEOUT, s.approver.approve(info)).await.unwrap_or(false);
+    if !approved {
+        return Err(LanError::PairingFailed.into());
+    }
+    let key = web::new_session_key();
+    let fp = web::session_fingerprint(&key);
+    let now = s.clock.now_ms();
+    let (pool, lib, platform, n) = (s.pool.clone(), s.cfg.library_id, req.platform, name.clone());
+    let device_id = blocking(move || {
+        write_tx(&pool, |c| store::insert_web_device(c, &n, &platform, &fp, lib, now, now + web::WEB_SESSION_TTL_MS))
+    })
+    .await?;
+    s.registry.insert(fp, device_id);
+    let body = WebSession {
+        device_id,
+        device_name: name,
+        server_name: s.cfg.display_name.clone(),
+        session_key: Some(key.clone()),
+    };
+    let mut res = (StatusCode::CREATED, Json(body)).into_response();
+    if let Ok(v) = HeaderValue::from_str(&web::session_cookie(&key)) {
+        res.headers_mut().insert(header::SET_COOKIE, v);
+    }
+    res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    web::harden(res.headers_mut());
+    Ok(res)
+}
+
+/// Sayfa açılışı: bu tarayıcı hâlâ eşleşmiş mi.
+async fn web_whoami(State(st): State<AppState>, Extension(pc): Extension<PeerCert>, headers: HeaderMap) -> ApiResult {
+    let device = authed(&st, &pc, &headers).await?;
+    let body = WebSession {
+        device_id: device.id,
+        device_name: device.name,
+        server_name: st.0.cfg.display_name.clone(),
+        session_key: None,
+    };
+    let mut res = Json(body).into_response();
+    res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(res)
+}
+
+/// Özet hesaplamadan önce: ad + değişiklik zamanı bu tarayıcıdan daha önce görüldü mü.
+async fn web_precheck(
+    State(st): State<AppState>,
+    Extension(pc): Extension<PeerCert>,
+    headers: HeaderMap,
+    Json(items): Json<Vec<PrecheckItem>>,
+) -> ApiResult {
+    if items.len() > web::MAX_PRECHECK_ITEMS {
+        return Err(LanError::BadRequest(format!("en çok {} öğe", web::MAX_PRECHECK_ITEMS)).into());
+    }
+    let device = authed(&st, &pc, &headers).await?;
+    let pool = st.0.pool.clone();
+    let pairs: Vec<(String, i64)> = items.into_iter().map(|i| (i.device_asset_id, i.modified_at)).collect();
+    let known = blocking(move || pool.read(|c| Ok(store::known_assets(c, device.id, &pairs)))?).await?;
+    Ok(Json(PrecheckResponse { known }).into_response())
 }
 
 async fn options_files() -> Response {
@@ -449,7 +544,7 @@ async fn create(State(st): State<AppState>, Extension(pc): Extension<PeerCert>, 
     if let Some(r) = tus_precondition(&headers) {
         return Ok(r);
     }
-    let device = authed(&st, &pc).await?;
+    let device = authed(&st, &pc, &headers).await?;
     let meta = UploadMeta::from_tus(header_str(&headers, "upload-length"), header_str(&headers, "upload-metadata"))?;
     let status = |s: &str| ("loupe-sync-status", s.to_owned());
     Ok(match st.0.uploads.create(&device, meta).await? {
@@ -499,7 +594,7 @@ async fn head_upload(
     if let Some(r) = tus_precondition(&headers) {
         return Ok(r);
     }
-    let device = authed(&st, &pc).await?;
+    let device = authed(&st, &pc, &headers).await?;
     let (offset, length) = st.0.uploads.offset(device.id, &id).await?;
     Ok(tus_response(
         StatusCode::OK,
@@ -531,7 +626,7 @@ async fn patch_upload(
     if let Some(r) = tus_precondition(&headers) {
         return Ok(r);
     }
-    let device = authed(&st, &pc).await?;
+    let device = authed(&st, &pc, &headers).await?;
     if header_str(&headers, "content-type") != Some("application/offset+octet-stream") {
         return Ok(tus_response(StatusCode::UNSUPPORTED_MEDIA_TYPE, &[]));
     }
@@ -557,7 +652,7 @@ async fn terminate_upload(
     if let Some(r) = tus_precondition(&headers) {
         return Ok(r);
     }
-    let device = authed(&st, &pc).await?;
+    let device = authed(&st, &pc, &headers).await?;
     st.0.uploads.terminate(device.id, &id).await?;
     Ok(tus_response(StatusCode::NO_CONTENT, &[]))
 }

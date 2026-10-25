@@ -14,8 +14,8 @@ use std::sync::Arc;
 use loupe_app::{
     AiStatusDto, AppConfig, AppCore, AppError, AppResult, CloudSettingsDto, CloudTargetInput, CloudTargetStatusDto,
     CullRequest, CullResult, DeviceDto, EncryptionDto, EventCard, FaceRef, ImportRequest, ImportSessionDto,
-    InspectorDetail, LibraryDto, PairingQrDto, PaletteRequest, PaletteResult, PeopleDto, RecoveryDraftDto, SidebarDto,
-    SmartAlbumDto, StatusDto, TimelineRequest, TimelineSlice, VerifyRunDto,
+    InspectorDetail, LibraryDto, ModelsDto, PairingQrDto, PaletteRequest, PaletteResult, PeopleDto, RecoveryDraftDto,
+    SidebarDto, SmartAlbumDto, StatusDto, TimelineRequest, TimelineSlice, VerifyRunDto,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, Runtime, State};
@@ -292,6 +292,22 @@ async fn set_resource_mode(state: State<'_, Desktop>, mode: String) -> Cmd<AiSta
     blocking(&state, move |c| c.set_resource_mode(&mode)).await
 }
 
+#[tauri::command]
+async fn models_status(state: State<'_, Desktop>) -> Cmd<ModelsDto> {
+    blocking(&state, |c| c.models_status()).await
+}
+
+/// İndirme arka planda sürer; ilerleme `models_status` ile yoklanır.
+#[tauri::command]
+async fn models_install(state: State<'_, Desktop>) -> Cmd<ModelsDto> {
+    state.core.models_install()
+}
+
+#[tauri::command]
+async fn models_cancel(state: State<'_, Desktop>) -> Cmd<ModelsDto> {
+    blocking(&state, |c| c.models_cancel()).await
+}
+
 // ───────────────────────────── Wi-Fi eşleşme ─────────────────────────────
 
 #[tauri::command]
@@ -472,6 +488,9 @@ pub fn wire<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             exclude_from_event,
             set_event_locked,
             ai_status,
+            models_status,
+            models_install,
+            models_cancel,
             set_paused,
             set_resource_mode,
             pairing_qr,

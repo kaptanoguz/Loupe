@@ -109,3 +109,4 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: bash tools/slop-guard/slop-guard.sh
+      - run: bash tools/slop-guard/slop-guard.sh crates/loupe-lan/web

@@ -1,0 +1,69 @@
+{
+  "version": 1,
+  "sources": [
+    {
+      "id": "insightface-buffalo_l",
+      "url": "https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip",
+      "size": 288621354,
+      "sha256": "80ffe37d8a5940d59a7384c201a2a38d4741f2f3c51eef46ebb28218a7b0ca2f",
+      "archive": "zip",
+      "license": "InsightFace: yalnızca ticari olmayan araştırma kullanımı"
+    },
+    {
+      "id": "onnxruntime-linux-x64-1.22.0",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-linux-x64-1.22.0.tgz",
+      "size": 7798730,
+      "sha256": "8344d55f93d5bc5021ce342db50f62079daf39aaafb5d311a451846228be49b3",
+      "archive": "tgz",
+      "license": "MIT"
+    },
+    {
+      "id": "mclip-visual",
+      "url": "https://huggingface.co/immich-app/XLM-Roberta-Large-Vit-B-32/resolve/main/visual/model.onnx",
+      "hf": { "repo": "immich-app/XLM-Roberta-Large-Vit-B-32", "revision": "main", "path": "visual/model.onnx" },
+      "license": "MIT (M-CLIP), OpenAI CLIP ViT-B/32"
+    },
+    {
+      "id": "mclip-textual",
+      "url": "https://huggingface.co/immich-app/XLM-Roberta-Large-Vit-B-32/resolve/main/textual/model.onnx",
+      "hf": { "repo": "immich-app/XLM-Roberta-Large-Vit-B-32", "revision": "main", "path": "textual/model.onnx" },
+      "license": "MIT (M-CLIP), XLM-RoBERTa"
+    },
+    {
+      "id": "mclip-tokenizer",
+      "url": "https://huggingface.co/immich-app/XLM-Roberta-Large-Vit-B-32/resolve/main/textual/tokenizer.json",
+      "hf": { "repo": "immich-app/XLM-Roberta-Large-Vit-B-32", "revision": "main", "path": "textual/tokenizer.json" },
+      "license": "MIT"
+    }
+  ],
+  "files": [
+    {
+      "file": "scrfd_10g.onnx",
+      "role": "face_detect",
+      "source": "insightface-buffalo_l",
+      "member": "det_10g.onnx",
+      "size": 16923827,
+      "sha256": "5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91"
+    },
+    {
+      "file": "arcface_w600k_r50.onnx",
+      "role": "face_embed",
+      "dim": 512,
+      "source": "insightface-buffalo_l",
+      "member": "w600k_r50.onnx",
+      "size": 174383860,
+      "sha256": "4c06341c33c2ca1f86781dab0e829f88ad5b64be9fba56e56bc9ebdefc619e43"
+    },
+    { "file": "mclip_image.onnx", "role": "clip_image", "dim": 512, "source": "mclip-visual" },
+    { "file": "mclip_text.onnx", "role": "clip_text", "dim": 512, "source": "mclip-textual" },
+    { "file": "mclip_tokenizer.json", "role": "tokenizer", "source": "mclip-tokenizer" },
+    {
+      "file": "libonnxruntime.so",
+      "role": "runtime",
+      "source": "onnxruntime-linux-x64-1.22.0",
+      "member": "onnxruntime-linux-x64-1.22.0/lib/libonnxruntime.so.1.22.0",
+      "size": 21042416,
+      "sha256": "3da6146e14e7b8aaec625dde11d6114c7457c87a5f93d744897da8781e35c673"
+    }
+  ]
+}
