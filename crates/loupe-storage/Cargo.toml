@@ -1,0 +1,25 @@
+[package]
+name = "loupe-storage"
+description = "Loupe depolama: disk/UUID çözümleme, tek geçişte hash, atomik import, dosya izleyici, bit-rot doğrulama"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+blake3.workspace = true
+image.workspace = true
+loupe-core.workspace = true
+notify-debouncer-full.workspace = true
+rustix.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+loupe-db.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true
