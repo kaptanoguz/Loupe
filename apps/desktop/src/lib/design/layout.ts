@@ -54,5 +54,12 @@ export type ThumbClass = keyof typeof THUMB_PX;
 export const CONTROL = 28;
 export const TOOLBAR = 40;
 export const STATUSBAR = 24;
-export const SIDEBAR = 240;
-export const INSPECTOR = 320;
+export const SIDEBAR = 220;
+export const INSPECTOR = 280;
+
+/**
+ * Küçük resim henüz üretilmediyse (thumb:// 404) yeniden deneme: 400, 800, 1600 …
+ * ms sonra, en fazla bu kadar kez. Çekirdek ilk 404'te işi Immediate önceliğe alır.
+ */
+export const THUMB_RETRIES = 5;
+export const THUMB_RETRY_MS = 400;

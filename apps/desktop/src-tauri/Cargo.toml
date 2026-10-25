@@ -1,0 +1,36 @@
+[package]
+name = "loupe-desktop"
+description = "Loupe masaüstü kabuğu: Tauri v2 penceresi, thumb:// şeması ve arayüz komutları"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "loupe_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "loupe"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+loupe-app.workspace = true
+loupe-lan.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+
+[dev-dependencies]
+loupe-core.workspace = true
+loupe-db.workspace = true
+image.workspace = true
+tempfile.workspace = true
+tauri = { version = "2", features = ["test"] }
+
+[lints]
+workspace = true
