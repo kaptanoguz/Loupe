@@ -20,7 +20,7 @@ mod vec_ext;
 
 pub use batch::{BATCH_SIZE, BatchReport, insert_import_items_batch, insert_media_batch};
 pub use catalog::{DbImportCatalog, DbVerifyCatalog};
-pub use connection::{ConnectionConfig, Role, open_connection};
+pub use connection::{ConnectionConfig, Role, haversine_km, open_connection, turkish_lowercase};
 pub use error::DbError;
 pub use migrate::{MIGRATIONS, Migration, MigrationReport, migrate, validate_schema};
 pub use pool::{Pool, PoolConfig};

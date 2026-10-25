@@ -1,6 +1,14 @@
 [workspace]
 resolver = "3"
-members = ["crates/loupe-core", "crates/loupe-db", "crates/loupe-storage", "crates/loupe-media", "crates/loupe-jobs"]
+members = [
+    "crates/loupe-core",
+    "crates/loupe-db",
+    "crates/loupe-storage",
+    "crates/loupe-media",
+    "crates/loupe-jobs",
+    "crates/loupe-ai",
+    "crates/loupe-search",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -14,6 +22,8 @@ loupe-db = { path = "crates/loupe-db" }
 loupe-storage = { path = "crates/loupe-storage" }
 loupe-media = { path = "crates/loupe-media" }
 loupe-jobs = { path = "crates/loupe-jobs" }
+loupe-ai = { path = "crates/loupe-ai" }
+loupe-search = { path = "crates/loupe-search" }
 
 blake3 = "1.8"
 http = "1"
@@ -23,6 +33,9 @@ rstar = "0.12"
 webp = { version = "0.3", default-features = false }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 notify-debouncer-full = "0.7"
+# Gerçek çıkarım (loupe-ai `ort` özelliği): ONNX Runtime çalışma anında dlopen ile yüklenir,
+# derleme sırasında ikili indirilmez.
+ort = { version = "=2.0.0-rc.10", default-features = false, features = ["std", "load-dynamic"] }
 rusqlite = { version = "0.41", features = ["bundled", "hooks", "functions"] }
 rustix = { version = "1.1", features = ["fs"] }
 serde = { version = "1", features = ["derive"] }
@@ -30,6 +43,7 @@ serde_json = "1"
 sqlite-vec = "0.1.9"
 tempfile = "3"
 thiserror = "2"
+tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }
 unicode-normalization = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
 

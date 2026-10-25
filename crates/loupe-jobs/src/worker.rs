@@ -5,6 +5,7 @@
 //! 50 000 iş beklerken görünen bir küçük resim en çok bir iş süresi bekler.
 
 use std::any::Any;
+use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -12,7 +13,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::JobsError;
-use crate::model::{Job, JobError};
+use crate::model::{Job, JobError, JobId, JobKind, NewJob};
 use crate::queue::JobQueue;
 use crate::throttle::{ResourceMode, Throttle};
 
@@ -41,6 +42,56 @@ impl JobContext<'_> {
     /// Uzun iş kirasını uzatır; kira kaybedildiyse `false` (iş başkasına geçti).
     pub fn renew_lease(&self, job: &Job) -> Result<bool, JobsError> {
         self.queue.renew(job.id, self.owner, self.lease)
+    }
+
+    /// Ardıl iş ekler (ör. küçük resimden sonra yüz tespiti).
+    pub fn enqueue(&self, job: &NewJob) -> Result<JobId, JobsError> {
+        self.queue.enqueue(job)
+    }
+
+    #[must_use]
+    pub const fn queue(&self) -> &JobQueue {
+        self.queue
+    }
+}
+
+/// İş türüne göre işleyici seçer: tek havuz medya hattını ve AI işlerini
+/// birlikte çalıştırır. Yönlendirilmemiş tür `UNSUPPORTED_KIND` ile dead olur.
+#[derive(Default)]
+pub struct JobRouter {
+    routes: HashMap<JobKind, Arc<dyn JobHandler>>,
+}
+
+impl std::fmt::Debug for JobRouter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut kinds: Vec<_> = self.routes.keys().map(|k| k.as_str()).collect();
+        kinds.sort_unstable();
+        f.debug_struct("JobRouter").field("kinds", &kinds).finish()
+    }
+}
+
+impl JobRouter {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// `kinds` türlerini `handler`a bağlar (sonraki çağrı öncekini ezer).
+    #[must_use]
+    pub fn route(mut self, kinds: &[JobKind], handler: Arc<dyn JobHandler>) -> Self {
+        for &k in kinds {
+            self.routes.insert(k, Arc::clone(&handler));
+        }
+        self
+    }
+}
+
+impl JobHandler for JobRouter {
+    fn run(&self, job: &Job, ctx: &JobContext<'_>) -> Result<(), JobError> {
+        match self.routes.get(&job.kind) {
+            Some(h) => h.run(job, ctx),
+            None => Err(JobError::permanent("UNSUPPORTED_KIND", format!("{} için işleyici yok", job.kind))),
+        }
     }
 }
 

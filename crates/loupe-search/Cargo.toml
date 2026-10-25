@@ -1,0 +1,24 @@
+[package]
+name = "loupe-search"
+description = "Loupe birleşik hibrit arama: kişi, yer, zaman, etkinlik, CLIP + metin (RRF) ve akıllı albümler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+loupe-ai.workspace = true
+loupe-core.workspace = true
+loupe-db.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+blake3.workspace = true
+image.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

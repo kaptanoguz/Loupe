@@ -35,6 +35,7 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "0004_thumb_sizes_job_claim",
         sql: include_str!("../migrations/0004_thumb_sizes_job_claim.sql"),
     },
+    Migration { version: 5, name: "0005_ml_state", sql: include_str!("../migrations/0005_ml_state.sql") },
 ];
 
 /// Migrasyonlardan sonra var olması gereken tablolar (sanal tablolar dahil).
@@ -58,6 +59,7 @@ pub const EXPECTED_TABLES: &[&str] = &[
     "media_duplicates",
     "media_files",
     "media_metadata",
+    "media_ml_state",
     "ml_models",
     "near_duplicate_groups",
     "persons",

@@ -1,9 +1,15 @@
 //! Medya hattının iş işleyicileri: `thumb`, `metadata_full` ve `geocode`.
 //! Kuyruk iş türlerini bilmez; bu modül `loupe-media` ile `loupe-db`'yi
 //! [`JobHandler`] üzerinden birbirine bağlar.
+//!
+//! `md` küçük resmi üretilince AI ardıl işleri kuyruğa girer: medya başına
+//! `face_detect` ve `clip_embed` (Background), kütüphane başına tek
+//! `cluster_events` (Idle, debounce'lu: içe aktarma bitince bir kez çalışır).
+//! İşleyicileri `loupe-ai` sağlar; [`crate::JobRouter`] ile aynı havuza takılır.
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use loupe_core::{MediaFileType, MediaId};
 use loupe_db::models::MediaFile;
@@ -12,7 +18,7 @@ use loupe_db::{DbError, Pool};
 use loupe_media::thumb::{SourceKind, webp_dimensions};
 use loupe_media::{GeoIndex, MediaError, Place, ThumbSize, Thumbnailer, read_metadata};
 
-use crate::model::{Job, JobError, JobKind};
+use crate::model::{Job, JobError, JobKind, NewJob, Priority};
 use crate::worker::{JobContext, JobHandler};
 
 /// Kataloğdaki satırdan dosyanın bugünkü mutlak yolu. Disk takılı değilse
@@ -48,6 +54,8 @@ pub struct MediaPipeline {
     thumbnailer: Thumbnailer,
     geo: Option<Arc<GeoIndex>>,
     resolve: Box<PathResolver>,
+    ai_followups: bool,
+    event_debounce: Duration,
 }
 
 impl std::fmt::Debug for MediaPipeline {
@@ -67,7 +75,40 @@ impl MediaPipeline {
         geo: Option<Arc<GeoIndex>>,
         resolve: impl Fn(&MediaFile) -> Option<PathBuf> + Send + Sync + 'static,
     ) -> Self {
-        Self { pool, thumbnailer, geo, resolve: Box::new(resolve) }
+        Self {
+            pool,
+            thumbnailer,
+            geo,
+            resolve: Box::new(resolve),
+            ai_followups: true,
+            event_debounce: Duration::from_secs(30),
+        }
+    }
+
+    /// AI işleyicisi olmayan kurulumlar (ör. yalnızca küçük resim testleri) için.
+    #[must_use]
+    pub const fn without_ai_followups(mut self) -> Self {
+        self.ai_followups = false;
+        self
+    }
+
+    /// Son içe aktarmadan sonra etkinlik kümelemesinin ne kadar bekleyeceği.
+    #[must_use]
+    pub const fn with_event_debounce(mut self, d: Duration) -> Self {
+        self.event_debounce = d;
+        self
+    }
+
+    fn enqueue_ai(&self, media: MediaId, ctx: &JobContext<'_>) -> Result<(), JobError> {
+        let jobs = [
+            NewJob::media(JobKind::FaceDetect, media, "", Priority::Background),
+            NewJob::media(JobKind::ClipEmbed, media, "", Priority::Background),
+            NewJob::global(JobKind::ClusterEvents, Priority::Idle).with_delay(self.event_debounce),
+        ];
+        for j in &jobs {
+            ctx.enqueue(j).map_err(|e| JobError::transient("ENQUEUE", e.to_string()))?;
+        }
+        Ok(())
     }
 
     fn media(&self, job: &Job) -> Result<(MediaFile, PathBuf), JobError> {
@@ -81,7 +122,7 @@ impl MediaPipeline {
         Ok((m, path))
     }
 
-    fn thumb(&self, job: &Job) -> Result<(), JobError> {
+    fn thumb(&self, job: &Job, ctx: &JobContext<'_>) -> Result<(), JobError> {
         let size: ThumbSize = job
             .variant
             .parse()
@@ -127,6 +168,9 @@ impl MediaPipeline {
             }
         };
         self.pool.write(|c| thumbnail::upsert(c, &row))?;
+        if self.ai_followups && size == ThumbSize::Md {
+            self.enqueue_ai(m.id, ctx)?;
+        }
         Ok(())
     }
 
@@ -196,9 +240,9 @@ pub fn new_location(p: &Place, dataset_ver: &str) -> location::NewLocation {
 }
 
 impl JobHandler for MediaPipeline {
-    fn run(&self, job: &Job, _ctx: &JobContext<'_>) -> Result<(), JobError> {
+    fn run(&self, job: &Job, ctx: &JobContext<'_>) -> Result<(), JobError> {
         match job.kind {
-            JobKind::Thumb => self.thumb(job),
+            JobKind::Thumb => self.thumb(job, ctx),
             JobKind::MetadataFull => self.metadata(job),
             JobKind::Geocode => self.geocode(job),
             other => Err(JobError::permanent("UNSUPPORTED_KIND", format!("{other} bu işleyicide değil"))),

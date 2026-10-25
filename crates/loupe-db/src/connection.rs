@@ -72,9 +72,44 @@ fn apply_pragmas(conn: &Connection, role: Role, cfg: &ConnectionConfig) -> Resul
     Ok(())
 }
 
-/// `hamming(a, b)`: iki pHash arasındaki farklı bit sayısı. Şema bu fonksiyona
-/// bağlı değildir (indeksler bant ifadeleriyle kurulur); yakın kopya sorgusu kullanır.
+/// Türkçe kurallarıyla küçük harf (I → ı, İ → i); SQLite `lower()` yalnızca ASCII çevirir.
+#[must_use]
+pub fn turkish_lowercase(s: &str) -> String {
+    s.chars()
+        .flat_map(|c| match c {
+            'I' => vec!['ı'],
+            'İ' => vec!['i'],
+            other => other.to_lowercase().collect(),
+        })
+        .collect()
+}
+
+/// İki koordinat arasındaki büyük çember uzaklığı (km).
+#[must_use]
+pub fn haversine_km(a: (f64, f64), b: (f64, f64)) -> f64 {
+    let (la1, lo1, la2, lo2) = (a.0.to_radians(), a.1.to_radians(), b.0.to_radians(), b.1.to_radians());
+    let h = ((la2 - la1) / 2.0).sin().powi(2) + la1.cos() * la2.cos() * ((lo2 - lo1) / 2.0).sin().powi(2);
+    2.0 * 6371.0088 * h.sqrt().min(1.0).asin()
+}
+
+/// SQL fonksiyonları (her bağlantıda):
+/// - `hamming(a, b)`: iki pHash arasındaki farklı bit sayısı. Şema bu fonksiyona
+///   bağlı değildir (indeksler bant ifadeleriyle kurulur); yakın kopya sorgusu kullanır.
+/// - `tr_lower(s)`: Türkçe küçük harf (arama).
+/// - `haversine_km(lat1, lon1, lat2, lon2)`: yarıçap süzgeci (arama).
 fn register_functions(conn: &Connection) -> Result<(), DbError> {
+    let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC | FunctionFlags::SQLITE_INNOCUOUS;
+    conn.create_scalar_function("tr_lower", 1, flags, |ctx| {
+        let s: Option<String> = ctx.get(0)?;
+        Ok(s.map(|s| turkish_lowercase(&s)))
+    })?;
+    conn.create_scalar_function("haversine_km", 4, flags, |ctx| {
+        let v: [Option<f64>; 4] = [ctx.get(0)?, ctx.get(1)?, ctx.get(2)?, ctx.get(3)?];
+        Ok(match v {
+            [Some(a), Some(b), Some(c), Some(d)] => Some(haversine_km((a, b), (c, d))),
+            _ => None,
+        })
+    })?;
     conn.create_scalar_function(
         "hamming",
         2,

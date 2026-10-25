@@ -178,13 +178,7 @@ fn enqueue_is_idempotent_and_keeps_the_most_urgent_priority() {
     assert_eq!(q.stats().unwrap().pending, 1201);
 
     // Medyasız (global) işler de tekilleşir.
-    let g = NewJob {
-        kind: JobKind::ClusterFaces,
-        media_id: None,
-        variant: String::new(),
-        priority: Priority::Idle,
-        max_attempts: None,
-    };
+    let g = NewJob::global(JobKind::ClusterFaces, Priority::Idle);
     assert_eq!(q.enqueue(&g).unwrap(), q.enqueue(&g).unwrap());
 
     // Şema kısıtı: thumb varyantı yalnızca sm/md/lg.
@@ -422,12 +416,15 @@ fn pipeline_thumbnails_metadata_location_and_corrupt_file_goes_dead() {
         let p = root.join(m.rel_path.as_str());
         p.exists().then_some(p)
     };
-    let handler = Arc::new(MediaPipeline::new(
-        Arc::clone(&e.pool),
-        Thumbnailer::new(cache.clone(), Box::new(ImageBackend)),
-        Some(Arc::clone(&geo)),
-        resolver,
-    ));
+    let handler = Arc::new(
+        MediaPipeline::new(
+            Arc::clone(&e.pool),
+            Thumbnailer::new(cache.clone(), Box::new(ImageBackend)),
+            Some(Arc::clone(&geo)),
+            resolver,
+        )
+        .without_ai_followups(),
+    );
     let q = Arc::new(JobQueue::with_retry(
         Arc::clone(&e.pool),
         RetryPolicy { base: Duration::from_secs(60), max: Duration::from_secs(60) },
@@ -489,4 +486,33 @@ fn pipeline_thumbnails_metadata_location_and_corrupt_file_goes_dead() {
     // Takılı olmayan disk: geçici hata, geri çekilerek bekliyor.
     let off = q.find(JobKind::Thumb, Some(offline), "sm").unwrap().unwrap();
     assert_eq!((off.state, off.last_error_code.as_deref()), (JobState::Failed, Some("VOLUME_OFFLINE")));
+}
+
+// ───────────────────────────── debounce ve yeniden çalıştırma ─────────────────────────────
+
+#[test]
+fn delayed_global_job_debounces_and_rerun_request_while_running_is_not_lost() {
+    let e = env();
+    let q = JobQueue::new(Arc::clone(&e.pool));
+    let job = NewJob::global(JobKind::ClusterEvents, Priority::Idle).with_delay(Duration::from_secs(60));
+
+    let id = q.enqueue(&job).unwrap();
+    let first = q.get(id).unwrap().unwrap().run_after;
+    std::thread::sleep(Duration::from_millis(5));
+    assert_eq!(q.enqueue(&job).unwrap(), id, "tek satır");
+    assert!(q.get(id).unwrap().unwrap().run_after > first, "yeni istek başlangıcı ileri kaydırır");
+    assert!(q.claim("w", 9, Duration::from_secs(30)).unwrap().is_none(), "gecikme dolmadan alınmaz");
+
+    // Hemen hazır bir istek gelir, işçi alır; iş sürerken yeni istek gelir.
+    let now = NewJob::global(JobKind::ClusterFaces, Priority::Idle);
+    let fid = q.enqueue(&now).unwrap();
+    let claimed = q.claim("w", 9, Duration::from_secs(30)).unwrap().unwrap();
+    assert_eq!(claimed.id, fid);
+    q.enqueue(&now).unwrap();
+    q.complete(fid, "w").unwrap();
+    let again = q.get(fid).unwrap().expect("iş sürerken gelen istek kaybolmamalı");
+    assert_eq!((again.state, again.attempts), (JobState::Pending, 0));
+    let second = q.claim("w", 9, Duration::from_secs(30)).unwrap().unwrap();
+    q.complete(second.id, "w").unwrap();
+    assert!(q.get(fid).unwrap().is_none(), "ikinci çalıştırmadan sonra satır silinir");
 }

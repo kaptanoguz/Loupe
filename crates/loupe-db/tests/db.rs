@@ -80,7 +80,7 @@ fn migrations_apply_once_and_pragmas_hold() {
     {
         let pool = Pool::open(&path, PoolConfig::default()).unwrap();
         let r = pool.migration_report();
-        assert_eq!((r.from_version, r.to_version, r.applied.clone()), (0, 4, vec![1, 2, 3, 4]));
+        assert_eq!((r.from_version, r.to_version, r.applied.clone()), (0, 5, vec![1, 2, 3, 4, 5]));
         pool.write(|c| {
             let mode: String = c.query_row("PRAGMA journal_mode", [], |r| r.get(0))?;
             let sync: i64 = c.query_row("PRAGMA synchronous", [], |r| r.get(0))?;
@@ -102,7 +102,7 @@ fn migrations_apply_once_and_pragmas_hold() {
     }
     let pool = Pool::open(&path, PoolConfig::default()).unwrap();
     let r = pool.migration_report();
-    assert_eq!((r.from_version, r.to_version, r.applied.len()), (4, 4, 0));
+    assert_eq!((r.from_version, r.to_version, r.applied.len()), (5, 5, 0));
 }
 
 #[test]
@@ -124,7 +124,7 @@ fn newer_schema_is_rejected() {
     let c = rusqlite::Connection::open(&path).unwrap();
     c.pragma_update(None, "user_version", 99).unwrap();
     drop(c);
-    assert!(matches!(Pool::open(&path, PoolConfig::default()), Err(DbError::SchemaTooNew { found: 99, known: 4 })));
+    assert!(matches!(Pool::open(&path, PoolConfig::default()), Err(DbError::SchemaTooNew { found: 99, known: 5 })));
 }
 
 #[test]
@@ -447,5 +447,8 @@ fn migration_0004_maps_pending_thumb_jobs_to_new_size_classes() {
         [id.0],
     );
     assert!(bad.is_err());
+    for m in &MIGRATIONS[4..] {
+        c.execute_batch(m.sql).unwrap();
+    }
     loupe_db::validate_schema(&c).unwrap();
 }
