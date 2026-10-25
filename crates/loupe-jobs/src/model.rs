@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::str::FromStr;
+use std::time::Duration;
 
 use loupe_core::MediaId;
 
@@ -112,6 +113,10 @@ pub struct JobId(pub i64);
 
 /// Kuyruğa eklenecek iş. Aynı `(kind, media_id, variant)` ikinci kez eklenirse
 /// yeni satır açılmaz; daha acil olan öncelik kalır.
+///
+/// `delay` verilen işler sondan tetiklemeli debounce ile çalışır: bekleyen iş
+/// yeniden eklendikçe başlangıcı ileri kayar. Medyasız (küresel) iş çalışırken
+/// yeniden eklenirse bittiğinde bir kez daha çalışır; istek kaybolmaz.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewJob {
     pub kind: JobKind,
@@ -121,12 +126,26 @@ pub struct NewJob {
     pub priority: Priority,
     /// `None` = şema varsayılanı (5).
     pub max_attempts: Option<u32>,
+    /// `None` = hemen hazır.
+    pub delay: Option<Duration>,
 }
 
 impl NewJob {
     #[must_use]
     pub fn media(kind: JobKind, media_id: MediaId, variant: &str, priority: Priority) -> Self {
-        Self { kind, media_id: Some(media_id), variant: variant.to_owned(), priority, max_attempts: None }
+        Self { kind, media_id: Some(media_id), variant: variant.to_owned(), priority, max_attempts: None, delay: None }
+    }
+
+    /// Medyaya bağlı olmayan iş (`cluster_faces`, `cluster_events`): kütüphanede tektir.
+    #[must_use]
+    pub fn global(kind: JobKind, priority: Priority) -> Self {
+        Self { kind, media_id: None, variant: String::new(), priority, max_attempts: None, delay: None }
+    }
+
+    #[must_use]
+    pub const fn with_delay(mut self, delay: Duration) -> Self {
+        self.delay = Some(delay);
+        self
     }
 
     #[must_use]

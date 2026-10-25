@@ -2,10 +2,11 @@
 
 Linux için yerel öncelikli (local-first) fotoğraf kataloglama, LAN senkronizasyon ve hibrit bulut yedekleme uygulaması.
 
-Durum: Adım 2B — medya hattı (`loupe-media`) ve öncelikli iş kuyruğu (`loupe-jobs`).
+Durum: Adım 2C — çevrimdışı AI motoru (`loupe-ai`) ve hibrit arama (`loupe-search`).
 
 - [RFC-001A — Veritabanı ve Depolama Mimarisi](docs/rfc/RFC-001A-veritabani-ve-depolama.md)
 - [RFC-001B — İş Kuyruğu ve AI, LAN Sync, Bulut Yedekleme, Tasarım Sistemi](docs/rfc/RFC-001B-kuyruk-lan-bulut-tasarim.md)
+- [RFC-001C — Çevrimdışı AI, Kişi/Etkinlik Kümeleme ve Hibrit Arama](docs/rfc/RFC-001C-ai-ve-arama.md)
 - Şema: [`crates/loupe-db/migrations/`](crates/loupe-db/migrations/) · test: `python3 tools/schema-check/check_schema.py crates/loupe-db/migrations`
 - Tasarım sistemi: [`apps/desktop/src/app.css`](apps/desktop/src/app.css) · koruma: `tools/slop-guard/slop-guard.sh`
 
@@ -17,10 +18,14 @@ Durum: Adım 2B — medya hattı (`loupe-media`) ve öncelikli iş kuyruğu (`lo
 | `loupe-db` | SQLite havuzu (WAL, NORMAL, mmap, foreign_keys, busy_timeout), gömülü migrasyon motoru + doğrulama, sqlite-vec, CRUD, 500'lük `BEGIN IMMEDIATE` toplu yazma |
 | `loupe-storage` | Disk/UUID çözümleme ve yeniden konumlandırma, tek geçişte BLAKE3 + pHash, atomik importer (Kopyala/Taşı/Hardlink, `.loupe-tmp/`), debounce'lu izleyici, Verify Library |
 | `loupe-media` | EXIF (JPEG, PNG, WebP, HEIC, CR2/NEF/ARW/DNG), saat dilimi ve GPS; DMS biçimleme; çevrimdışı GeoNames R-ağacı; XMP + `.loupe.json` sidecar; RAW gömülü önizleme; `sm`/`md`/`lg` WebP küçük resim (`ThumbnailBackend`, isteğe bağlı `vips`); `thumb://` işleyicisi |
-| `loupe-jobs` | SQLite `jobs` üzerinde kalıcı kuyruk, viewport önceliği (`bump_viewport_priority`), işçi havuzu (ayrılmış acil işçi, panik yalıtımı), duraklat/mod/kullanıcı etkinliği kısması, üstel geri çekilme ve dead-letter; medya işleyicileri |
+| `loupe-jobs` | SQLite `jobs` üzerinde kalıcı kuyruk, viewport önceliği (`bump_viewport_priority`), işçi havuzu (ayrılmış acil işçi, panik yalıtımı), duraklat/mod/kullanıcı etkinliği kısması, üstel geri çekilme ve dead-letter; debounce'lu küresel işler; `JobRouter`; medya işleyicileri (`md` küçük resimden sonra AI işleri) |
+| `loupe-ai` | `FaceDetector`/`FaceEmbedder`/`ClipImageEncoder`/`ClipTextEncoder` trait'leri; `DeterministicMockEngine` (CI); `ort` özelliğiyle SCRFD + ArcFace + M-CLIP; boşta model boşaltma; artımlı yüz kümeleme (birleştir/ayır/taşı/adlandır); `vec_media_clip`; zaman + konum etkinlik algılama (kullanıcı düzenlemesi korunur) |
+| `loupe-search` | Kişi (hepsi/herhangi), yer (ülke/il/ilçe/yerleşim, kutu, yarıçap), zaman (aralık, yerel yıl/ay/gün), etkinlik, puan, favori, renk, kamera/objektif ve doğal dil metnini tek sorguda birleştiren hibrit arama (CLIP + sözcük, RRF); JSON kurallı akıllı albümler |
 
 ```sh
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings   # üretim kodunda unwrap/expect/panic derlemeyi kırar
 cargo fmt --check
+# Gerçek modeller (ONNX Runtime çalışma anında: ORT_DYLIB_PATH=/usr/lib/libonnxruntime.so)
+cargo clippy -p loupe-ai --features ort --all-targets -- -D warnings
 ```

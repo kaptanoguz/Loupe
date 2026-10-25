@@ -240,12 +240,24 @@ impl JobQueue {
         Ok(n == 1)
     }
 
-    /// Başarılı iş: satır silinir.
+    /// Başarılı iş: satır silinir. İş sürerken yeniden istendiyse (`rerun`)
+    /// satır sıfır denemeyle yeniden bekler.
     pub fn complete(&self, id: JobId, owner: &str) -> Result<(), JobsError> {
-        self.pool.write(|conn| {
-            conn.execute("DELETE FROM jobs WHERE id = ?1 AND lease_owner = ?2", params![id.0, owner])?;
-            Ok(())
+        let again = self.pool.write(|conn| {
+            let again = conn.execute(
+                "UPDATE jobs SET state = 'pending', rerun = 0, attempts = 0, lease_owner = NULL, lease_until = NULL,
+                        updated_at = ?3
+                  WHERE id = ?1 AND lease_owner = ?2 AND rerun = 1",
+                params![id.0, owner, now_ms()],
+            )?;
+            if again == 0 {
+                conn.execute("DELETE FROM jobs WHERE id = ?1 AND lease_owner = ?2", params![id.0, owner])?;
+            }
+            Ok(again > 0)
         })?;
+        if again {
+            self.signal.notify();
+        }
         Ok(())
     }
 
@@ -409,6 +421,10 @@ fn truncate(msg: &str) -> &str {
 
 /// Ekle ya da var olan işin önceliğini yükselt (dead işlere dokunulmaz:
 /// tarama her seferinde bozuk dosyayı yeniden kuyruğa sokmasın).
+///
+/// Gecikmeli iş bekliyorsa başlangıcı ileri kayar (debounce). Çalışan küresel
+/// işte `rerun` işaretlenir: [`JobQueue::complete`] satırı silmek yerine yeniden
+/// bekletir, böylece iş sürerken gelen istek kaybolmaz.
 fn upsert(conn: &Connection, j: &NewJob, now: i64) -> Result<JobId, DbError> {
     let conflict = if j.media_id.is_some() {
         "ON CONFLICT (kind, media_id, variant)"
@@ -417,15 +433,36 @@ fn upsert(conn: &Connection, j: &NewJob, now: i64) -> Result<JobId, DbError> {
     };
     let sql = format!(
         "INSERT INTO jobs (kind, media_id, variant, base_priority, max_attempts, run_after, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, COALESCE(?5, 5), ?6, ?6, ?6)
-         {conflict} DO UPDATE SET base_priority = min(base_priority, excluded.base_priority), updated_at = excluded.updated_at
+         VALUES (?1, ?2, ?3, ?4, COALESCE(?5, 5), ?6, ?7, ?7)
+         {conflict} DO UPDATE SET
+           base_priority = min(base_priority, excluded.base_priority),
+           run_after = CASE
+             WHEN state = 'running' AND media_id IS NULL THEN excluded.run_after
+             WHEN ?8 AND state = 'pending' THEN max(run_after, excluded.run_after)
+             ELSE run_after END,
+           rerun = CASE WHEN state = 'running' AND media_id IS NULL THEN 1 ELSE rerun END,
+           updated_at = excluded.updated_at
            WHERE state <> 'dead'
          RETURNING id"
     );
+    let delay_ms = j.delay.map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX / 2));
+    let run_after = now.saturating_add(delay_ms);
     let media = j.media_id.map(|m| m.0);
     let id: Option<i64> = conn
         .prepare_cached(&sql)?
-        .query_row(params![j.kind.as_str(), media, j.variant, j.priority.level(), j.max_attempts, now], |r| r.get(0))
+        .query_row(
+            params![
+                j.kind.as_str(),
+                media,
+                j.variant,
+                j.priority.level(),
+                j.max_attempts,
+                run_after,
+                now,
+                j.delay.is_some()
+            ],
+            |r| r.get(0),
+        )
         .optional()?;
     match id {
         Some(id) => Ok(JobId(id)),

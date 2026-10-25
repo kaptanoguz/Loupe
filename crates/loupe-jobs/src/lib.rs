@@ -16,7 +16,7 @@ pub use handlers::MediaPipeline;
 pub use model::{Job, JobError, JobId, JobKind, JobRecord, JobState, NewJob, Priority, QueueStats};
 pub use queue::{ENQUEUE_BATCH, JobQueue, RetryPolicy};
 pub use throttle::{ResourceMode, Throttle};
-pub use worker::{JobContext, JobHandler, WorkerConfig, WorkerPool};
+pub use worker::{JobContext, JobHandler, JobRouter, WorkerConfig, WorkerPool};
 
 #[derive(Debug, thiserror::Error)]
 pub enum JobsError {

@@ -16,6 +16,9 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
+      # Gerçek ONNX modelleri: ONNX Runtime dlopen ile yüklenir, derlemede ikili indirilmez.
+      - run: cargo clippy -p loupe-ai --features ort --all-targets --locked -- -D warnings
+      - run: cargo test -p loupe-ai --features ort --lib --locked
       # İsteğe bağlı libvips arka ucu ve kayıpsız (saf Rust) WebP yolu.
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvips-tools
       - run: cargo test -p loupe-media --features vips --locked
