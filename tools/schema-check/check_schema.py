@@ -1,15 +1,20 @@
 """Şema duman testi: migrasyonu gerçek SQLite + sqlite-vec üzerinde çalıştırır,
 kısıtları, tetikleyicileri ve indeks planlarını kontrol eder.
 
-Kullanım: pip install sqlite-vec && python3 tools/schema-check/check_schema.py crates/loupe-db/migrations/0001_initial.sql
+Kullanım: pip install sqlite-vec && python3 tools/schema-check/check_schema.py crates/loupe-db/migrations
+(Klasördeki NNNN_*.sql dosyaları sırayla, her biri tek transaction'da uygulanır.)
 """
 import sqlite3, sqlite_vec, sys, struct, os
 db = sqlite3.connect(":memory:", isolation_level=None)
 db.enable_load_extension(True); sqlite_vec.load(db)
 for p in ["foreign_keys=ON","journal_mode=WAL","synchronous=NORMAL","mmap_size=268435456"]:
     db.execute("PRAGMA "+p)
-sql = open(sys.argv[1], encoding="utf-8").read()
-db.executescript("BEGIN;\n" + sql + "\nCOMMIT;")
+import glob
+migrations = sorted(glob.glob(os.path.join(sys.argv[1], "[0-9][0-9][0-9][0-9]_*.sql")))
+assert migrations, "migrasyon bulunamadı"
+for m in migrations:
+    db.executescript("BEGIN;\n" + open(m, encoding="utf-8").read() + "\nCOMMIT;")
+    print("applied", os.path.basename(m))
 print("sqlite", sqlite3.sqlite_version, "vec", db.execute("select vec_version()").fetchone()[0])
 print("user_version", db.execute("PRAGMA user_version").fetchone()[0])
 print("fk violations", db.execute("PRAGMA foreign_key_check").fetchall())
@@ -73,4 +78,41 @@ db.execute("insert into edits(version_id,seq,op,params,engine_version,created_at
 print("revision", db.execute("select revision from versions").fetchone())
 # timeline plan
 print(db.execute("explain query plan select id from media_files where soft_deleted_at is null and taken_at_utc < ? order by taken_at_utc desc, id desc limit 200",(T+5,)).fetchall())
+
+# ── 0002: iş kuyruğu, bulut kuyruğu, LAN ──
+db.execute("insert into jobs(kind,media_id,variant,base_priority,run_after,created_at,updated_at) values('thumb',2,'grid',0,?,?,?)",(T,T,T))
+try: db.execute("insert into jobs(kind,media_id,variant,base_priority,run_after,created_at,updated_at) values('thumb',2,'grid',5,?,?,?)",(T,T,T)); print("FAIL")
+except sqlite3.IntegrityError as e: print("duplicate job blocked:", e)
+try: db.execute("insert into jobs(kind,media_id,variant,base_priority,run_after,created_at,updated_at) values('thumb',2,'huge',0,?,?,?)",(T,T,T)); print("FAIL")
+except sqlite3.IntegrityError as e: print("bad thumb variant blocked:", e)
+try: db.execute("update jobs set state='running' where id=1"); print("FAIL")
+except sqlite3.IntegrityError as e: print("running without lease blocked:", e)
+# atomik kira alma (RETURNING)
+row = db.execute("""update jobs set state='running', lease_owner='1/thumb-0', lease_until=?, attempts=attempts+1, updated_at=?
+  where id = (select id from jobs where kind='thumb' and state in ('pending','failed') and run_after <= ?
+              order by base_priority, run_after, id limit 1) returning id, attempts""",(T+30000,T,T)).fetchone()
+assert row == (1, 1), row; print("lease acquired", row)
+print(db.execute("explain query plan select id from jobs where kind='thumb' and state in ('pending','failed') and run_after <= ? order by base_priority, run_after, id limit 1",(T,)).fetchall())
+db.execute("insert into jobs(kind,variant,base_priority,run_after,created_at,updated_at) values('cluster_faces','',6,?,?,?)",(T,T,T))
+try: db.execute("insert into jobs(kind,variant,base_priority,run_after,created_at,updated_at) values('cluster_faces','',6,?,?,?)",(T,T,T)); print("FAIL")
+except sqlite3.IntegrityError as e: print("duplicate global job blocked:", e)
+db.execute("insert into sync_queue(target_id,media_id,op,run_after,bytes_total,created_at,updated_at) values(1,2,'upload',?,100,?,?)",(T,T,T))
+try: db.execute("update sync_queue set bytes_done=200"); print("FAIL")
+except sqlite3.IntegrityError as e: print("bytes_done > total blocked:", e)
+db.execute("""insert into devices(name,platform,cert_sha256,spki_sha256,cert_serial,cert_not_after,target_library_id,paired_at)
+  values('Pixel 9','android',randomblob(32),randomblob(32),randomblob(16),?,1,?)""",(T+10**11,T))
+db.execute("insert into lan_transfers(upload_id,device_id,library_id,client_asset_id,filename,expected_blake3,expected_size,staging_name,client_modified_at,created_at,updated_at,expires_at) values('AAAAAAAAAAAAAAAAAAAAAA',1,1,'ms:1234','PXL_1.jpg',randomblob(32),1000,'x.part',?,?,?,?)",(T,T,T,T+7*86400000))
+try: db.execute("insert into lan_transfers(upload_id,device_id,library_id,client_asset_id,filename,expected_blake3,expected_size,staging_name,client_modified_at,created_at,updated_at,expires_at) values('BBBBBBBBBBBBBBBBBBBBBB',1,1,'ms:1234','PXL_1.jpg',randomblob(32),1000,'y.part',?,?,?,?)",(T,T,T,T)); print("FAIL")
+except sqlite3.IntegrityError as e: print("second active transfer for same asset blocked:", e)
+try: db.execute("update lan_transfers set state='done', offset_bytes=1000"); print("FAIL")
+except sqlite3.IntegrityError as e: print("done without result blocked:", e)
+try: db.execute("update lan_transfers set offset_bytes=2000"); print("FAIL")
+except sqlite3.IntegrityError as e: print("offset > size blocked:", e)
+print("settings", db.execute("select count(*) from settings").fetchone()[0])
+try: db.execute("insert into settings values('Bad Key','1',0)"); print("FAIL")
+except sqlite3.IntegrityError as e: print("bad settings key blocked:", e)
+db.execute("delete from media_files where id=2")  # medya silinince işleri ve kuyruğu da gider
+print("after media delete: jobs", db.execute("select count(*) from jobs where media_id=2").fetchone()[0], "sync_queue", db.execute("select count(*) from sync_queue").fetchone()[0])
+print("user_version", db.execute("PRAGMA user_version").fetchone()[0])
+print("fk violations", db.execute("PRAGMA foreign_key_check").fetchall())
 print("OK")

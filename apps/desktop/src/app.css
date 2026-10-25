@@ -1,0 +1,389 @@
+/*
+ * Loupe — "No AI Slop" tasarım sistemi (Tailwind CSS v4, CSS-first yapılandırma)
+ * RFC-001B §4.
+ *
+ * Bu dosya Tailwind'in tek yapılandırmasıdır (v4'te tailwind.config.js gerekmez).
+ * İlke: yasak olan şey hiç üretilmez. Varsayılan renk, gölge, blur ve köşe
+ * ölçekleri `initial` ile silinir; geriye yalnızca aşağıda tanımlananlar kalır.
+ * Arbitrary değerlerle (`shadow-[…]`, `rounded-[12px]`) delme girişimleri
+ * tools/slop-guard tarafından CI'da yakalanır.
+ */
+
+@import "tailwindcss";
+
+/* ── Fontlar: uygulama içinde paketlenir (çevrimdışı, CDN yok). Lisans: SIL OFL 1.1 ── */
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/Geist[wght].woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/InterVariable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono[wght].woff2") format("woff2");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: block;
+}
+
+@theme {
+  /* ── 1. Varsayılanları SİL ─────────────────────────────────────────────── */
+  --color-*: initial;
+  --shadow-*: initial;
+  --inset-shadow-*: initial;
+  --drop-shadow-*: initial;
+  --text-shadow-*: initial;
+  --blur-*: initial;
+  --radius-*: initial;
+  --font-*: initial;
+  --text-*: initial;
+  --animate-*: initial;
+  --perspective-*: initial;
+
+  /* ── 2. Darkroom paleti ────────────────────────────────────────────────── */
+  /* Yüzeyler: tam nötr gri (R=G=B). Ton kayması fotoğrafın beyaz dengesi algısını bozar. */
+  --color-canvas: #0a0a0a;        /* fotoğrafların arkası */
+  --color-surface: #121212;       /* kenar çubuğu, denetçi, durum çubuğu */
+  --color-raised: #1a1a1a;        /* hover, menü, komut paleti, giriş alanı */
+  --color-line: #262626;          /* tüm 1px kenarlıklar */
+  --color-line-strong: #3a3a3a;   /* giriş hover kenarı, kaydırma çubuğu */
+
+  /* Metin */
+  --color-ink: #f5f5f7;           /* birincil metin, birincil buton, "senkronize" */
+  --color-ink-2: #a3a3a3;         /* ikincil: 7.4:1 surface üzerinde */
+  --color-ink-3: #737373;         /* üçüncül, devre dışı: 4.0:1 surface üzerinde */
+
+  /* Vurgu: YALNIZCA işlev (odak, seçim, aktif işlem, uyarı/hata). Dekorasyon yasak. */
+  --color-amber: #d97706;
+  --color-amber-ink: #0a0a0a;     /* kehribar üzerindeki metin */
+
+  /* Kullanıcı renk etiketleri (Lightroom/XMP uyumlu). Doygunluğu düşürülmüş,
+     parlaklığı eşitlenmiş. YALNIZCA 6×6 etiket karesi / 2px şerit; zemin veya metin olamaz. */
+  --color-label-red: #a0524a;
+  --color-label-yellow: #a08a48;
+  --color-label-green: #5f8459;
+  --color-label-blue: #4e6e8e;
+  --color-label-purple: #76658e;
+
+  /* ── 3. Köşe yarıçapı: en fazla 4px ────────────────────────────────────── */
+  --radius-xs: 2px;               /* butonlar, giriş alanları, etiketler */
+  --radius-sm: 4px;               /* menü, komut paleti, açılır paneller (üst sınır) */
+
+  /* ── 4. Tipografi ──────────────────────────────────────────────────────── */
+  --font-sans: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* Profesyonel araç yoğunluğu: arayüz varsayılanı 13px */
+  --text-2xs: 11px;
+  --text-2xs--line-height: 16px;
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 20px;
+  --text-base: 14px;
+  --text-base--line-height: 20px;
+  --text-lg: 16px;
+  --text-lg--line-height: 24px;
+  --text-xl: 20px;
+  --text-xl--line-height: 28px;
+
+  /* ── 5. Swiss Grid: 4px taban birimi ───────────────────────────────────── */
+  --spacing: 4px;                 /* p-1 = 4px, p-2 = 8px, p-3 = 12px … */
+
+  /* Düzen sabitleri (src/lib/design/layout.ts ile birebir aynı tutulur) */
+  --spacing-gutter: 2px;          /* fotoğraflar arası oluk */
+  --spacing-control: 28px;        /* buton / giriş yüksekliği */
+  --spacing-toolbar: 40px;
+  --spacing-statusbar: 24px;
+  --spacing-section: 32px;        /* zaman çizelgesi ay başlığı */
+  --spacing-sidebar: 240px;
+  --spacing-inspector: 320px;
+  --spacing-palette: 640px;       /* komut paleti genişliği */
+
+  /* ── 6. Hareket: kısa, sönümlü, sıçramasız ─────────────────────────────── */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --default-transition-duration: 120ms;
+  --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+    /* Geist: tek katlı 'a' yerine okunaklı rakam ve ayırt edilebilir 1/l/I */
+    font-feature-settings: "ss01", "cv11";
+    -webkit-text-size-adjust: 100%;
+  }
+
+  html,
+  body {
+    height: 100%;
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: var(--text-sm--line-height);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;             /* kaydırma yalnızca sanal kaydırma kabında */
+  }
+
+  /* Tüm kenarlıklar varsayılan olarak 1px #262626 */
+  *,
+  ::before,
+  ::after {
+    border-color: var(--color-line);
+  }
+
+  ::selection {
+    background: var(--color-amber);
+    color: var(--color-amber-ink);
+  }
+
+  /* Klavye odağı her zaman görünür; fare tıklamasında gösterilmez */
+  :focus {
+    outline: none;
+  }
+  :focus-visible {
+    outline: 1px solid var(--color-amber);
+    outline-offset: 1px;
+  }
+
+  /* Kromsuz kaydırma çubuğu (WebKitGTK) */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-line-strong);
+    border-radius: 0;
+  }
+
+  img {
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      transition-duration: 0ms !important;
+      animation-duration: 0ms !important;
+    }
+  }
+}
+
+/* ── Anlamsal yardımcılar ──────────────────────────────────────────────────── */
+
+/* EXIF, tarih/saat, koordinat, dosya boyutu, hash, hız: HER ZAMAN bununla */
+@utility data {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-feature-settings: "zero", "tnum";
+  letter-spacing: 0;
+}
+
+/* Bölüm etiketi: kart başlığı yerine tek satır, büyük harf, üçüncül renk */
+@utility label {
+  font-size: var(--text-2xs);
+  line-height: var(--text-2xs--line-height);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-ink-3);
+}
+
+/* Swiss Grid çizgisi: 1px solid #262626 */
+@utility hairline {
+  border-width: 1px;
+  border-style: solid;
+  border-color: var(--color-line);
+}
+
+/* Seçili fotoğraf: içe çizilir, düzen kaymaz */
+@utility selected {
+  outline: 2px solid var(--color-amber);
+  outline-offset: -2px;
+}
+
+/* Modal arka planı: düz karartma, bulanıklık YOK */
+@utility scrim {
+  background: rgb(10 10 10 / 0.72);
+}
+
+/* ── Bileşen katmanı (yalnızca belirteçlerle) ─────────────────────────────── */
+@layer components {
+  /* Buton: 28px, 2px yarıçap, 1px çizgi, gölge yok. Görünüm başına tek birincil. */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+    height: var(--spacing-control);
+    padding-inline: calc(var(--spacing) * 3);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--color-ink);
+    font-size: var(--text-sm);
+    line-height: 1;
+    white-space: nowrap;
+    transition: background-color var(--default-transition-duration) var(--ease-out),
+      border-color var(--default-transition-duration) var(--ease-out);
+  }
+  .btn:hover {
+    background: var(--color-raised);
+    border-color: var(--color-line-strong);
+  }
+  .btn:disabled {
+    color: var(--color-ink-3);
+    pointer-events: none;
+  }
+  .btn-primary {
+    background: var(--color-ink);
+    border-color: var(--color-ink);
+    color: var(--color-canvas);
+  }
+  .btn-primary:hover {
+    background: var(--color-ink-2);
+    border-color: var(--color-ink-2);
+  }
+  .btn-ghost {
+    border-color: transparent;
+  }
+
+  /* Giriş: odakta halka değil, kenarlığın kendisi kehribar olur (düzen kaymaz) */
+  .input {
+    height: var(--spacing-control);
+    padding-inline: calc(var(--spacing) * 2);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-xs);
+    background: var(--color-raised);
+    color: var(--color-ink);
+    font-size: var(--text-sm);
+  }
+  .input:hover {
+    border-color: var(--color-line-strong);
+  }
+  .input:focus-visible {
+    outline: none;
+    border-color: var(--color-amber);
+  }
+  .input::placeholder {
+    color: var(--color-ink-3);
+  }
+
+  /* Küçük resim hücresi: sanal kaydırma tarafından mutlak konumlandırılır */
+  .tile {
+    position: absolute;
+    top: 0;
+    left: 0;
+    overflow: hidden;
+    background: var(--color-raised);
+    contain: strict;
+    will-change: transform;
+  }
+  .tile > img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  /* Yedekleme mikro durum ikonu: 5×5px, 1px çizgi, sağ alt köşe, 4px içeride.
+     data-sync: local | queued | synced | error | offline */
+  .sync-dot {
+    position: absolute;
+    right: var(--spacing);
+    bottom: var(--spacing);
+    width: 5px;
+    height: 5px;
+    border: 1px solid var(--color-ink-3);
+    background: transparent;
+  }
+  .sync-dot[data-sync="queued"] {
+    border-color: var(--color-amber);
+  }
+  .sync-dot[data-sync="synced"] {
+    border-color: var(--color-ink);
+    background: var(--color-ink);
+  }
+  .sync-dot[data-sync="error"] {
+    border-color: var(--color-amber);
+    background: var(--color-amber);
+  }
+  /* Kütüphane çevrimdışı: kutunun içinden geçen çapraz 1px çizgi */
+  .sync-dot[data-sync="offline"]::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 7px;
+    height: 1px;
+    background: var(--color-ink-3);
+    transform: translate(-50%, -50%) rotate(-45deg);
+  }
+  [data-hide-sync] .sync-dot {
+    display: none;
+  }
+
+  /* Renk etiketi karesi: 6×6px, sol alt */
+  .label-dot {
+    position: absolute;
+    left: var(--spacing);
+    bottom: var(--spacing);
+    width: 6px;
+    height: 6px;
+  }
+
+  /* Komut paleti: düz yüzey, 1px çizgi, 4px yarıçap, gölge ve blur yok */
+  .palette {
+    width: var(--spacing-palette);
+    max-width: calc(100vw - 32px);
+    margin-top: 18vh;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-sm);
+    background: var(--color-raised);
+  }
+
+  /* Durum çubuğu: 24px, monospace, tabular rakamlar */
+  .statusbar {
+    height: var(--spacing-statusbar);
+    padding-inline: calc(var(--spacing) * 3);
+    border-top: 1px solid var(--color-line);
+    background: var(--color-surface);
+    color: var(--color-ink-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    line-height: var(--spacing-statusbar);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  /* Denetçi (EXIF) satırı: etiket grotesk, değer monospace sağa hizalı */
+  .kv {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    column-gap: calc(var(--spacing) * 3);
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
+  }
+  .kv > dt {
+    color: var(--color-ink-2);
+  }
+  .kv > dd {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums slashed-zero;
+    color: var(--color-ink);
+    text-align: right;
+  }
+}
