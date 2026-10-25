@@ -43,3 +43,26 @@ export function dateTime(unix: number | null | undefined, tzOffsetMin: number | 
   const p = (x: number) => String(x).padStart(2, "0");
   return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
 }
+
+/** Unix ms → "2025-10-24 15:32" (yerel saat). Katalog zamanları ms'dir. */
+export function dateTimeMs(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined) return "—";
+  const d = new Date(ms);
+  const p = (x: number) => String(x).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** 0:42, 12:05 (geri sayım, kalan süre). */
+export function clock(secs: number | null | undefined): string {
+  if (secs === null || secs === undefined || !Number.isFinite(secs)) return "—";
+  const s = Math.max(0, Math.round(secs));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+}
+
+/** Bayt/sn → "12.4 MB/s". */
+export function rate(bps: number | null | undefined): string {
+  return bps === null || bps === undefined || bps <= 0 ? "—" : `${bytes(bps)}/s`;
+}

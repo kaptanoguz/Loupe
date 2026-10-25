@@ -24,8 +24,30 @@ export const FIRST_PAGE = 600;
 export const PAGE = 5000;
 
 export function sameView(a: View, b: View): boolean {
+  if (a.kind === "search" || b.kind === "search") {
+    return a.kind === b.kind && JSON.stringify("query" in a ? a.query : null) === JSON.stringify("query" in b ? b.query : null);
+  }
   return a.kind === b.kind && ("id" in a ? a.id : null) === ("id" in b ? b.id : null);
 }
+
+/** Izgara yerine kendi sayfası olan görünümler. */
+export function isPageView(v: View): boolean {
+  return v.kind === "people" || v.kind === "events";
+}
+
+/** Kenar çubuğu dışından açılan görünümün başlığı (kişi adı, etkinlik, arama). */
+export interface Heading {
+  title: string;
+  subtitle?: string | null;
+  /** Arama görünümünde paletin girdisi (akıllı albüm adı önerisi). */
+  input?: string;
+}
+
+export type Overlay = "palette" | "wifi" | "settings" | null;
+export type SettingsTab = "cloud" | "encryption" | "verify" | "ai";
+
+/** Bilgi notu durum çubuğunda bu kadar kalır (ms). */
+export const NOTICE_MS = 4000;
 
 export class Catalog {
   view = $state<View>({ kind: "all" });
@@ -48,6 +70,11 @@ export class Catalog {
   sidebar = $state.raw<SidebarDto | null>(null);
   status = $state.raw<StatusDto | null>(null);
   error = $state<string | null>(null);
+  /** Başarılı işlem notu (hata değil); kısa süre sonra kaybolur. */
+  notice = $state<string | null>(null);
+  overlay = $state<Overlay>(null);
+  settingsTab = $state<SettingsTab>("cloud");
+  heading = $state.raw<Heading | null>(null);
   /** Son düzen hesabının süresi (ms), durum çubuğunda. */
   layoutMs = $state(0);
   /** Grid'in son hesapladığı düzen (↑/↓ komşu araması için). */
@@ -57,6 +84,7 @@ export class Catalog {
   aspects = new Float32Array(0);
   private loadToken = 0;
   private detailTimer: ReturnType<typeof setTimeout> | undefined;
+  private noticeTimer: ReturnType<typeof setTimeout> | undefined;
 
   readonly backend: Backend;
 
@@ -74,12 +102,29 @@ export class Catalog {
   }
 
   /** Görünümü açar: sayfaları sırayla çeker, her sayfada düzen güncellenir. */
-  async open(view: View, grouping: Grouping = this.grouping): Promise<void> {
+  async open(view: View, grouping: Grouping = this.grouping, heading: Heading | null = null): Promise<void> {
     const token = ++this.loadToken;
-    const keepId = sameView(view, this.view) ? this.selectedItem?.id : undefined;
+    const same = sameView(view, this.view);
+    const keepId = same ? this.selectedItem?.id : undefined;
+    if (!same || heading) this.heading = heading;
     this.view = view;
     this.grouping = grouping;
     this.error = null;
+    if (isPageView(view)) {
+      // Kişiler ve Etkinlikler kendi sayfalarında; ızgara boşaltılır.
+      this.items = [];
+      this.aspects = new Float32Array(0);
+      this.total = 0;
+      this.loaded = 0;
+      this.sections = [];
+      this.selected = -1;
+      this.detail = null;
+      this.opened = true;
+      this.closeLoupe();
+      this.rev++;
+      this.aspectsRev++;
+      return;
+    }
     try {
       let first = await this.backend.timelineSlice({ view, grouping, offset: 0, limit: FIRST_PAGE });
       if (token !== this.loadToken) return;
@@ -127,6 +172,22 @@ export class Catalog {
     } catch {
       // Durum çubuğu bir sonraki yoklamada yenilenir.
     }
+  }
+
+  openSettings(tab: SettingsTab): void {
+    this.settingsTab = tab;
+    this.overlay = "settings";
+  }
+
+  flash(message: string): void {
+    this.error = null;
+    this.notice = message;
+    clearTimeout(this.noticeTimer);
+    this.noticeTimer = setTimeout(() => (this.notice = null), NOTICE_MS);
+  }
+
+  fail(e: unknown): void {
+    this.error = e instanceof Error ? e.message : String(e);
   }
 
   select(idx: number): void {
@@ -200,6 +261,9 @@ export class Catalog {
         this.zoom = z;
         return true;
       }
+      case "palette":
+        this.overlay = this.overlay === "palette" ? null : "palette";
+        return true;
     }
   }
 

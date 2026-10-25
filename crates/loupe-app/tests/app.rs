@@ -157,9 +157,10 @@ fn import_fills_timeline_slices_with_day_and_month_sections() {
     let rotated = fx.slice(View::All, Grouping::Day, 0, 1).items[0].aspect;
     assert!((rotated - 0.75).abs() < 0.001, "{rotated}");
 
-    // İçe aktarma küçük resim + metadata işlerini kuyruğa koydu; görünür olanlar öne alınır.
+    // İçe aktarma küçük resim + metadata işlerini kuyruğa koydu (+1: açılıştaki etkinlik
+    // kümelemesi); görünür olanlar öne alınır.
     let stats = fx.core.queue().stats().unwrap();
-    assert_eq!(stats.pending, 15, "{stats:?}");
+    assert_eq!(stats.pending, 16, "{stats:?}");
     let boosted = fx.core.prioritize_viewport(&ids[..2]).unwrap();
     assert_eq!(boosted, 6);
     assert!(fx.core.prioritize_viewport(&vec![1; 3000]).is_err());

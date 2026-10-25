@@ -336,6 +336,21 @@ fn text_only_uses_knn_and_keywords_match_place_and_person_names() {
         lib.engine.search(&SearchQuery { text: Some("Ayşe".into()), limit: Some(1000), ..Default::default() }).unwrap();
     let kw: BTreeSet<MediaId> = ayse.hits.iter().filter(|h| h.keyword_rank.is_some()).map(|h| h.media_id).collect();
     assert_eq!(kw, lib.expect(|p| p.ayse));
+
+    // Büyük sınır sqlite-vec'in KNN üst sınırını (k ≤ 4096) aşmaz.
+    let wide = lib
+        .engine
+        .search(&SearchQuery { text: Some("orman".into()), limit: Some(5_000), ..Default::default() })
+        .unwrap();
+    assert!(!wide.hits.is_empty());
+
+    // Model yokken metin yalnızca adlarda aranır.
+    let kw_only = SearchEngine::keyword_only(lib.pool.clone());
+    assert!(!kw_only.is_semantic());
+    let r =
+        kw_only.search(&SearchQuery { text: Some("Ayşe".into()), limit: Some(1000), ..Default::default() }).unwrap();
+    assert!(r.hits.iter().all(|h| h.semantic.is_none()));
+    assert_eq!(r.ids().into_iter().collect::<BTreeSet<_>>(), lib.expect(|p| p.ayse));
 }
 
 #[test]

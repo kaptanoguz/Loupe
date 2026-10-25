@@ -6,9 +6,16 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+# Gerçek ONNX modelleri (yüz, CLIP). Kapalıyken AI `off` ya da `LOUPE_AI=mock`.
+ort = ["loupe-ai/ort"]
+
 [dependencies]
 http.workspace = true
+if-addrs.workspace = true
 image.workspace = true
+loupe-ai.workspace = true
 loupe-cloud.workspace = true
 loupe-core.workspace = true
 loupe-db.workspace = true
@@ -17,7 +24,9 @@ loupe-lan.workspace = true
 loupe-media.workspace = true
 loupe-search.workspace = true
 loupe-storage.workspace = true
+qrcode.workspace = true
 rusqlite.workspace = true
+secret-service.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

@@ -28,6 +28,12 @@ pub enum AppError {
     #[error(transparent)]
     Cloud(#[from] loupe_cloud::CloudError),
 
+    #[error(transparent)]
+    Ai(#[from] loupe_ai::AiError),
+
+    #[error("anahtarlık: {0}")]
+    Secret(String),
+
     #[error("{context}: {source}")]
     Io {
         context: String,
@@ -69,6 +75,8 @@ impl AppError {
             Self::Search(_) => "SEARCH",
             Self::Lan(_) => "LAN",
             Self::Cloud(_) => "CLOUD",
+            Self::Ai(_) => "AI",
+            Self::Secret(_) => "SECRET",
             Self::Io { .. } => "IO",
             Self::NotFound { .. } => "NOT_FOUND",
             Self::Invalid(_) => "INVALID",

@@ -16,13 +16,20 @@ use loupe_media::{GeoIndex, ThumbCache, ThumbProtocol, ThumbSize, Thumbnailer};
 use loupe_storage::{LibraryWatcher, WatchEvent};
 use serde::Serialize;
 
+use crate::ai::{self, AiRuntime, AiStatusDto};
+use crate::cloud::{self, CloudSettingsDto, CloudTargetInput, EncryptionDto, Recovery, RecoveryDraftDto};
 use crate::culling::{self, CullRequest, CullResult};
+use crate::full::{self, FullRes};
 use crate::import::{ImportRequest, ImportSessionDto, Imports, post_import_jobs};
 use crate::inspector::{self, InspectorDetail};
 use crate::library::{Libraries, LibraryDto};
-use crate::network::{CloudTargetStatusDto, LanStatusDto, Network};
-use crate::secrets::{FileSecretStore, SecretStore};
+use crate::moments::{self, EventCard};
+use crate::network::{CloudTargetStatusDto, DeviceDto, LanStatusDto, Network, PairingQrDto};
+use crate::people::{self, FaceRef, PeopleDto};
+use crate::search::{self, PaletteRequest, PaletteResult, RankCache};
+use crate::secrets::{FileSecretStore, LayeredSecretStore, SecretStore};
 use crate::timeline::{self, SmartAlbumDto, TimelineRequest, TimelineSlice, View};
+use crate::verify::{self, Verifier, VerifyRunDto};
 use crate::{AppConfig, AppError, AppResult};
 
 /// Görünür alan bildirimi başına en çok medya (tek ekran + overscan ~150–400).
@@ -49,6 +56,9 @@ pub struct StatusDto {
     pub free_bytes: Option<i64>,
     pub lan: LanStatusDto,
     pub cloud: Vec<CloudTargetStatusDto>,
+    pub ai: AiStatusDto,
+    /// Süren "Kütüphaneyi Doğrula" sayısı.
+    pub verifying: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -77,6 +87,12 @@ pub struct AppCore {
     network: Arc<Network>,
     thumbs: ThumbCache,
     protocol: ThumbProtocol,
+    full: FullRes,
+    ai: AiRuntime,
+    search: loupe_search::SearchEngine,
+    ranks: RankCache,
+    recovery: Recovery,
+    verifier: Arc<Verifier>,
     workers: Mutex<Option<WorkerPool>>,
     watchers: Mutex<Vec<(LibraryId, LibraryWatcher)>>,
 }
@@ -89,7 +105,12 @@ impl std::fmt::Debug for AppCore {
 
 impl AppCore {
     pub fn open(cfg: AppConfig) -> AppResult<Arc<Self>> {
-        let secrets = Arc::new(FileSecretStore::new(cfg.data_dir.join("secrets")));
+        let file = FileSecretStore::new(cfg.data_dir.join("secrets"));
+        let secrets = Arc::new(if cfg.secret_service {
+            LayeredSecretStore::new(file)
+        } else {
+            LayeredSecretStore::file_only(file)
+        });
         Self::open_with(cfg, secrets)
     }
 
@@ -116,6 +137,12 @@ impl AppCore {
             }
         });
 
+        let full = FullRes::new(pool.clone(), libraries.clone(), cfg.full_dir());
+        let ai = AiRuntime::open(cfg.ai.clone());
+        let search = match &ai.engine {
+            Some(e) => loupe_search::SearchEngine::new(pool.clone(), e.clip_text.clone()),
+            None => loupe_search::SearchEngine::keyword_only(pool.clone()),
+        };
         let core = Arc::new(Self {
             cfg,
             pool,
@@ -125,6 +152,12 @@ impl AppCore {
             network,
             thumbs,
             protocol,
+            full,
+            ai,
+            search,
+            ranks: RankCache::default(),
+            recovery: Recovery::default(),
+            verifier: Arc::new(Verifier::default()),
             workers: Mutex::new(None),
             watchers: Mutex::new(Vec::new()),
         });
@@ -133,6 +166,8 @@ impl AppCore {
         culling::flush_dirty_sidecars(&core.libraries, &core.pool, 10_000)?;
         core.start_workers()?;
         core.restart_watchers()?;
+        // Model sonradan geldiyse eski fotoğraflar; her açılışta bir etkinlik kümelemesi.
+        ai::backfill(&core.pool, &core.queue, core.ai.active())?;
         Ok(core)
     }
 
@@ -141,16 +176,29 @@ impl AppCore {
         let geo = GeoIndex::load_dir(&self.cfg.geonames_dir()).ok().map(Arc::new);
         let libs = self.libraries.clone();
         let thumbnailer = Thumbnailer::new(self.thumbs.clone(), loupe_media::thumb::default_backend());
-        // AI işleri (yüz, CLIP) model ayarlarıyla birlikte bağlanır; şimdilik ardıl iş açılmaz.
+        // `md` küçük resmi çıkınca yüz, CLIP ve (gecikmeli) etkinlik işleri açılır.
         let pipeline =
-            MediaPipeline::new(self.pool.clone(), thumbnailer, geo, move |m| libs.media_path(m).ok().flatten())
-                .without_ai_followups();
+            MediaPipeline::new(self.pool.clone(), thumbnailer, geo, move |m| libs.media_path(m).ok().flatten());
         let handler: Arc<dyn JobHandler> = Arc::new(
-            JobRouter::new().route(&[JobKind::Thumb, JobKind::MetadataFull, JobKind::Geocode], Arc::new(pipeline)),
+            JobRouter::new()
+                .route(&[JobKind::Thumb, JobKind::MetadataFull, JobKind::Geocode], Arc::new(pipeline))
+                .route(&ai::job_kinds(), self.ai_handler()),
         );
         let pool = WorkerPool::start(self.queue.clone(), handler, wcfg)?;
+        if let Some(mode) = ai::get_setting(&self.pool, ai::SETTING_MODE)?.and_then(|v| v.as_str().map(str::to_owned)) {
+            pool.set_mode(ai::parse_mode(&mode)?);
+        }
+        if ai::get_setting(&self.pool, ai::SETTING_PAUSED)?.and_then(|v| v.as_bool()) == Some(true) {
+            pool.pause();
+        }
         *self.workers.lock().map_err(|_| AppError::Poisoned)? = Some(pool);
         Ok(())
+    }
+
+    /// AI iş türlerinin işleyicisi (testler kuyruğu bununla elle çalıştırır).
+    #[must_use]
+    pub fn ai_handler(&self) -> Arc<dyn JobHandler> {
+        self.ai.handler(self.pool.clone(), self.thumbs.clone())
     }
 
     /// Çevrimiçi kütüphaneler için inotify izleyicilerini (yeniden) kurar.
@@ -196,6 +244,7 @@ impl AppCore {
         if ids.is_empty() {
             return Ok(());
         }
+        self.ranks.clear();
         self.queue.enqueue_batch(&post_import_jobs(ids))?;
         self.network.enqueue_new(ids)
     }
@@ -242,8 +291,12 @@ impl AppCore {
     // ───────────────────────────── thumb:// ─────────────────────────────
 
     /// `thumb://sm/<blake3>` isteği: önbellekteki baytlar, JSON/base64 yok.
+    /// `thumb://orig/<blake3>`: Loupe 1:1 için tam çözünürlük ([`crate::full`]).
     pub fn handle_thumb<B>(&self, req: &Request<B>) -> Response<Cow<'static, [u8]>> {
-        self.protocol.handle(req)
+        match full::parse(req.uri()) {
+            Some(hash) => self.full.handle(req, &hash),
+            None => self.protocol.handle(req),
+        }
     }
 
     #[must_use]
@@ -295,7 +348,14 @@ impl AppCore {
     }
 
     pub fn timeline_slice(&self, req: &TimelineRequest) -> AppResult<TimelineSlice> {
-        timeline::slice(&self.pool, req)
+        let ranked = self.pool.read(|c| req.view.ranked_query(c).map_err(to_db))?;
+        match ranked {
+            Some(q) => {
+                let ids = search::ranked_ids(&self.search, &self.ranks, &q)?;
+                timeline::slice_ranked(&self.pool, req, Some(&ids))
+            }
+            None => timeline::slice(&self.pool, req),
+        }
     }
 
     /// Ekrandaki medyanın bekleyen işleri (küçük resim, metadata) öne alınır.
@@ -312,7 +372,275 @@ impl AppCore {
     }
 
     pub fn set_rating_label_favorite(&self, req: &CullRequest) -> AppResult<Vec<CullResult>> {
+        self.ranks.clear();
         culling::apply(&self.libraries, &self.pool, req)
+    }
+
+    // ───────────────────────────── arama paleti ─────────────────────────────
+
+    pub fn search_palette(&self, req: &PaletteRequest) -> AppResult<PaletteResult> {
+        search::palette(&self.search, &self.ranks, req)
+    }
+
+    pub fn save_smart_album(
+        &self,
+        name: &str,
+        query: &loupe_search::SearchQuery,
+        pinned: bool,
+    ) -> AppResult<timeline::SmartAlbumDto> {
+        search::save_smart_album(&self.pool, name, query, pinned)
+    }
+
+    pub fn delete_smart_album(&self, id: i64) -> AppResult<()> {
+        search::delete_smart_album(&self.pool, id)
+    }
+
+    // ───────────────────────────── kişiler ─────────────────────────────
+
+    pub fn people(&self) -> AppResult<PeopleDto> {
+        people::list(&self.pool)
+    }
+
+    pub fn person_faces(&self, person: Option<i64>, cluster: Option<i64>, limit: u32) -> AppResult<Vec<FaceRef>> {
+        people::faces(&self.pool, person, cluster, limit)
+    }
+
+    pub fn name_cluster(&self, cluster: i64, name: &str) -> AppResult<i64> {
+        self.ranks.clear();
+        people::name_cluster(&self.pool, cluster, name)
+    }
+
+    pub fn rename_person(&self, person: i64, name: &str) -> AppResult<i64> {
+        self.ranks.clear();
+        people::rename_person(&self.pool, person, name)
+    }
+
+    pub fn merge_clusters(&self, into: i64, from: &[i64]) -> AppResult<()> {
+        self.ranks.clear();
+        people::merge(&self.pool, into, from)
+    }
+
+    pub fn merge_persons(&self, into: i64, from: &[i64]) -> AppResult<()> {
+        self.ranks.clear();
+        people::merge_persons(&self.pool, into, from)
+    }
+
+    pub fn move_face(&self, face: i64, to_cluster: i64) -> AppResult<()> {
+        self.ranks.clear();
+        people::move_face(&self.pool, face, to_cluster)
+    }
+
+    pub fn assign_face(&self, face: i64, person: i64) -> AppResult<()> {
+        self.ranks.clear();
+        people::assign_face(&self.pool, face, person)
+    }
+
+    pub fn detach_face(&self, face: i64) -> AppResult<i64> {
+        self.ranks.clear();
+        people::detach_face(&self.pool, face)
+    }
+
+    pub fn reject_face(&self, face: i64) -> AppResult<()> {
+        self.ranks.clear();
+        people::reject_face(&self.pool, face)
+    }
+
+    pub fn ignore_cluster(&self, cluster: i64, ignored: bool) -> AppResult<()> {
+        people::ignore_cluster(&self.pool, cluster, ignored)
+    }
+
+    // ───────────────────────────── etkinlikler ─────────────────────────────
+
+    pub fn events(&self) -> AppResult<Vec<EventCard>> {
+        moments::list(&self.pool)
+    }
+
+    pub fn rename_event(&self, id: i64, title: &str) -> AppResult<EventCard> {
+        self.ranks.clear();
+        moments::rename(&self.pool, id, title)
+    }
+
+    pub fn exclude_from_event(&self, id: i64, media: &[i64]) -> AppResult<EventCard> {
+        self.ranks.clear();
+        moments::exclude(&self.pool, id, media)
+    }
+
+    pub fn set_event_locked(&self, id: i64, locked: bool) -> AppResult<EventCard> {
+        moments::set_locked(&self.pool, id, locked)
+    }
+
+    pub fn create_event(&self, title: &str, media: &[i64]) -> AppResult<EventCard> {
+        self.ranks.clear();
+        moments::create(&self.pool, title, media)
+    }
+
+    /// Etkinlik kümelemesini hemen çalıştırır (kilitli etkinliklere dokunmaz).
+    pub fn recluster_events(&self) -> AppResult<Vec<EventCard>> {
+        let detector = loupe_ai::EventDetector::default();
+        loupe_ai::jobs::write_tx(&self.pool, |c| detector.recluster(c))?;
+        self.ranks.clear();
+        moments::list(&self.pool)
+    }
+
+    // ───────────────────────────── AI ve kaynaklar ─────────────────────────────
+
+    pub fn ai_status(&self) -> AppResult<AiStatusDto> {
+        let (paused, mode) = match self.workers.lock().map_err(|_| AppError::Poisoned)?.as_ref() {
+            Some(w) => (w.throttle().is_paused(), w.throttle().mode()),
+            None => (
+                ai::get_setting(&self.pool, ai::SETTING_PAUSED)?.and_then(|v| v.as_bool()).unwrap_or(false),
+                ai::get_setting(&self.pool, ai::SETTING_MODE)?
+                    .and_then(|v| v.as_str().map(str::to_owned))
+                    .map_or(Ok(loupe_jobs::ResourceMode::Balanced), |m| ai::parse_mode(&m))?,
+            ),
+        };
+        let (pending, faces_done, clip_done, images) = ai::queue_counts(&self.pool)?;
+        let reason = match (&self.ai.mode, &self.ai.error) {
+            (_, Some(e)) => Some(e.clone()),
+            (ai::AiMode::Off { reason }, None) => Some(reason.clone()),
+            _ => None,
+        };
+        Ok(AiStatusDto {
+            mode: if self.ai.active() { self.ai.mode.kind() } else { "off" },
+            reason,
+            semantic: self.search.is_semantic(),
+            paused,
+            resource_mode: ai::mode_name(mode),
+            pending,
+            faces_done,
+            clip_done,
+            images,
+        })
+    }
+
+    /// Arka plan işlerini duraklatır/sürdürür (görünen küçük resimler durmaz).
+    pub fn set_paused(&self, paused: bool) -> AppResult<AiStatusDto> {
+        ai::put_setting(&self.pool, ai::SETTING_PAUSED, &serde_json::Value::Bool(paused))?;
+        if let Some(w) = self.workers.lock().map_err(|_| AppError::Poisoned)?.as_ref() {
+            if paused { w.pause() } else { w.resume() }
+        }
+        self.ai_status()
+    }
+
+    /// `quiet` | `balanced` | `full`: aynı anda çalışan genel işçi sayısı.
+    pub fn set_resource_mode(&self, mode: &str) -> AppResult<AiStatusDto> {
+        let m = ai::parse_mode(mode)?;
+        ai::put_setting(&self.pool, ai::SETTING_MODE, &serde_json::Value::from(ai::mode_name(m)))?;
+        if let Some(w) = self.workers.lock().map_err(|_| AppError::Poisoned)?.as_ref() {
+            w.set_mode(m);
+        }
+        self.ai_status()
+    }
+
+    /// Kullanıcı arayüzde etkin (kaydırıyor, puanlıyor): toplu işler bekler.
+    pub fn set_user_active(&self, active: bool) -> AppResult<()> {
+        if let Some(w) = self.workers.lock().map_err(|_| AppError::Poisoned)?.as_ref() {
+            w.set_user_active(active);
+        }
+        Ok(())
+    }
+
+    // ───────────────────────────── Wi-Fi eşleşme ─────────────────────────────
+
+    pub async fn pairing_qr(&self) -> AppResult<PairingQrDto> {
+        self.network.pairing_qr().await
+    }
+
+    pub async fn cancel_pairing(&self) {
+        self.network.cancel_pairing().await;
+    }
+
+    pub fn devices(&self) -> AppResult<Vec<DeviceDto>> {
+        self.network.devices()
+    }
+
+    pub async fn revoke_device(&self, id: i64) -> AppResult<Vec<DeviceDto>> {
+        self.network.revoke_device(id).await?;
+        self.network.devices()
+    }
+
+    pub fn set_conflict_policy(&self, id: i64, policy: loupe_lan::ConflictPolicy) -> AppResult<Vec<DeviceDto>> {
+        self.network.set_conflict_policy(id, policy)?;
+        self.network.devices()
+    }
+
+    // ───────────────────────────── bulut ─────────────────────────────
+
+    pub fn cloud_settings(&self) -> AppResult<CloudSettingsDto> {
+        cloud::list(&self.pool, self.network.secrets().as_ref())
+    }
+
+    /// Hedef ekler (`id` yoksa) ya da günceller; yedekleme döngüleri yeniden kurulur.
+    pub fn save_cloud_target(&self, id: Option<i64>, input: &CloudTargetInput) -> AppResult<CloudSettingsDto> {
+        let secrets = self.network.secrets().as_ref();
+        match id {
+            Some(id) => cloud::update(&self.pool, secrets, id, input)?,
+            None => {
+                cloud::create(&self.pool, secrets, input)?;
+            }
+        }
+        self.network.restart_cloud()?;
+        self.cloud_settings()
+    }
+
+    pub fn set_cloud_target_enabled(&self, id: i64, enabled: bool) -> AppResult<CloudSettingsDto> {
+        cloud::set_enabled(&self.pool, id, enabled)?;
+        self.network.restart_cloud()?;
+        self.cloud_settings()
+    }
+
+    pub fn delete_cloud_target(&self, id: i64) -> AppResult<CloudSettingsDto> {
+        cloud::delete(&self.pool, self.network.secrets().as_ref(), id)?;
+        self.network.restart_cloud()?;
+        self.cloud_settings()
+    }
+
+    pub fn set_global_bandwidth(&self, mbps: Option<f64>) -> AppResult<CloudSettingsDto> {
+        cloud::set_global_bandwidth(&self.pool, mbps)?;
+        self.network.restart_cloud()?;
+        self.cloud_settings()
+    }
+
+    /// "Bulut Senkronizasyonunu Başlat": durmuş döngüler kurulur, çalışanlar uyanır.
+    pub fn start_cloud_sync(&self) -> AppResult<Vec<CloudTargetStatusDto>> {
+        self.network.restart_cloud()
+    }
+
+    pub fn generate_recovery_key(&self) -> AppResult<RecoveryDraftDto> {
+        self.recovery.generate(&self.pool)
+    }
+
+    pub fn export_recovery_key(&self, path: &std::path::Path) -> AppResult<()> {
+        self.recovery.export(path)
+    }
+
+    pub fn confirm_recovery_key(&self, answers: &[(usize, String)]) -> AppResult<EncryptionDto> {
+        let enc = self.recovery.confirm(&self.pool, self.network.secrets().as_ref(), answers)?;
+        self.network.restart_cloud()?;
+        Ok(enc)
+    }
+
+    pub fn cancel_recovery_key(&self) {
+        self.recovery.cancel();
+    }
+
+    pub fn check_recovery_key(&self, input: &str) -> AppResult<bool> {
+        cloud::check_recovery(&self.pool, input)
+    }
+
+    // ───────────────────────────── doğrulama ─────────────────────────────
+
+    /// "Kütüphaneyi Doğrula (Bit-Rot)". `library` yoksa çevrimiçi hepsi.
+    pub fn verify_library(&self, library: Option<i64>) -> AppResult<Vec<i64>> {
+        self.verifier.start(&self.pool, &self.libraries, library)
+    }
+
+    pub fn cancel_verify(&self, library: Option<i64>) -> AppResult<usize> {
+        self.verifier.cancel(library)
+    }
+
+    pub fn verify_runs(&self, limit: u32) -> AppResult<Vec<VerifyRunDto>> {
+        verify::recent(&self.pool, limit)
     }
 
     pub fn sidebar(&self) -> AppResult<SidebarDto> {
@@ -360,6 +688,15 @@ impl AppCore {
             free_bytes: libs.iter().filter(|l| l.primary).find_map(|l| l.free_bytes),
             lan: self.network.lan_status().await?,
             cloud: self.network.cloud_status()?,
+            ai: self.ai_status()?,
+            verifying: self.verifier.active(),
         })
+    }
+}
+
+fn to_db(e: AppError) -> loupe_db::DbError {
+    match e {
+        AppError::Db(d) => d,
+        other => loupe_db::DbError::Validation(other.to_string()),
     }
 }

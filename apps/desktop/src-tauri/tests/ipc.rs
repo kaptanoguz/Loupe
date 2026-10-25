@@ -118,5 +118,90 @@ fn commands_round_trip_through_ipc() {
     // Geçersiz argüman komuta ulaşmadan reddedilir.
     assert!(call(&w, "set_rating_label_favorite", json!({ "req": { "ids": "x" } })).is_err());
 
+    // ── Adım 3B ──
+    // Palet: belirteçler çipe, sorgu akıllı albüme; metinli sorgu "En alakalı" bölümüyle açılır.
+    let pal = call(&w, "search_palette", json!({ "req": { "input": "rating:>=4 kişi:Yok" } })).unwrap();
+    assert_eq!(pal["total"], 1);
+    assert_eq!(pal["chips"][0]["kind"], "rating");
+    assert_eq!(pal["chips"][1]["ok"], false);
+    assert_eq!(pal["semantic"], false, "AI kapalı: yalnızca sözcük araması");
+    let album =
+        call(&w, "save_smart_album", json!({ "name": "Dört yıldız", "query": pal["query"], "pinned": true })).unwrap();
+    let smart = call(
+        &w,
+        "get_timeline_slice",
+        json!({ "req": { "view": { "kind": "smart_album", "id": album["id"] }, "offset": 0, "limit": 10 } }),
+    )
+    .unwrap();
+    assert_eq!(smart["items"][0]["id"].as_i64(), Some(first));
+    let text = call(&w, "search_palette", json!({ "req": { "input": "A.JPG" } })).unwrap();
+    let ranked = call(
+        &w,
+        "get_timeline_slice",
+        json!({ "req": { "view": { "kind": "search", "query": text["query"] }, "offset": 0, "limit": 10 } }),
+    )
+    .unwrap();
+    assert_eq!(ranked["sections"][0]["title"], "En alakalı");
+    call(&w, "delete_smart_album", json!({ "id": album["id"] })).unwrap();
+
+    let people = call(&w, "list_people", json!({})).unwrap();
+    assert_eq!(people["named"].as_array().unwrap().len(), 0);
+    assert!(call(&w, "list_events", json!({})).unwrap().is_array());
+    let ai = call(&w, "ai_status", json!({})).unwrap();
+    assert_eq!(ai["mode"], "off");
+    assert_eq!(call(&w, "set_resource_mode", json!({ "mode": "quiet" })).unwrap()["resourceMode"], "quiet");
+    assert_eq!(call(&w, "set_resource_mode", json!({ "mode": "x" })).unwrap_err()["code"], "INVALID");
+
+    // Wi-Fi: sonuç makinenin ağına bağlı (LAN adresi yoksa koda göre ayrılan hata).
+    match call(&w, "pairing_qr", json!({})) {
+        Ok(qr) => {
+            assert_eq!(qr["ttlSecs"], 60);
+            assert!(qr["svg"].as_str().unwrap().contains("<path"), "QR yalnızca rect/path");
+            assert!(!qr["addrs"].as_array().unwrap().is_empty());
+            call(&w, "cancel_pairing", json!({})).unwrap();
+        }
+        Err(e) => assert_eq!(e["code"], "INVALID"),
+    }
+    assert_eq!(call(&w, "list_devices", json!({})).unwrap(), json!([]));
+    assert!(call(&w, "set_conflict_policy", json!({ "id": 1, "policy": "sometimes" })).is_err(), "bilinmeyen politika");
+
+    // Bulut ve kurtarma anahtarı.
+    let cloud = call(&w, "cloud_settings", json!({})).unwrap();
+    assert_eq!(cloud["encryption"]["configured"], false);
+    assert_eq!(cloud["secretBackend"], "file");
+    let draft = call(&w, "generate_recovery_key", json!({})).unwrap();
+    let answers: Vec<Value> = draft["challenge"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| json!({ "group": i, "value": draft["groups"][i.as_u64().unwrap() as usize] }))
+        .collect();
+    let enc = call(&w, "confirm_recovery_key", json!({ "answers": answers })).unwrap();
+    assert_eq!(enc["recipient"], draft["recipient"]);
+    assert_eq!(call(&w, "check_recovery_key", json!({ "key": draft["secret"] })).unwrap(), true);
+    let nas = tmp.path().join("nas");
+    let saved = call(
+        &w,
+        "save_cloud_target",
+        json!({ "input": { "name": "NAS", "provider": "local", "config": { "path": nas }, "bandwidthMbps": 5 } }),
+    )
+    .unwrap();
+    assert_eq!(saved["targets"][0]["encrypted"], true);
+    assert_eq!(saved["targets"][0]["bandwidthMbps"], 5.0);
+
+    // Doğrulama: bit-rot raporu.
+    let started = call(&w, "verify_library", json!({})).unwrap();
+    assert_eq!(started, json!([lib]));
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let runs = call(&w, "verify_runs", json!({ "limit": 3 })).unwrap();
+        if runs[0]["state"] == "done" {
+            assert_eq!(runs[0]["ok"], 2);
+            break;
+        }
+        assert!(Instant::now() < deadline, "{runs}");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
     tauri::async_runtime::block_on(core.shutdown());
 }

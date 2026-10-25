@@ -11,7 +11,11 @@ export type View =
   | { kind: "events" }
   | { kind: "people" }
   | { kind: "places" }
-  | { kind: "smart_album"; id: number };
+  | { kind: "smart_album"; id: number }
+  | { kind: "search"; query: SearchQuery }
+  | { kind: "person"; id: number }
+  | { kind: "cluster"; id: number }
+  | { kind: "event"; id: number };
 
 export type ViewKey = "all" | "favorites" | "events" | "people" | "places";
 
@@ -221,7 +225,14 @@ export interface LanStatusDto {
   pairedDevices: number;
   activeUploads: number;
   bytesPerSec: number;
+  bytesExpected: number;
+  bytesReceived: number;
+  /** Kalan süre (sn); hız bilinmiyorsa `null`. */
+  etaSecs: number | null;
   verifiedFiles: number;
+  skipped: number;
+  conflicts: number;
+  failed: number;
   error: string | null;
 }
 
@@ -246,6 +257,9 @@ export interface StatusDto {
   freeBytes: number | null;
   lan: LanStatusDto;
   cloud: CloudTargetStatusDto[];
+  ai: AiStatusDto;
+  /** Süren "Kütüphaneyi Doğrula" sayısı. */
+  verifying: number;
 }
 
 /** Rust `AppError` serileştirmesi. */
@@ -255,3 +269,228 @@ export interface AppErrorDto {
 }
 
 export type ThumbSize = "sm" | "md" | "lg";
+/** `orig`: tam çözünürlük (RAW gömülü önizleme ya da yönü düzeltilmiş özgün). */
+export type ImageSize = ThumbSize | "orig";
+
+// ───────────────────────────── arama paleti ─────────────────────────────
+
+/**
+ * `loupe_search::SearchQuery` (alanlar snake_case). Arayüz bunu kurmaz:
+ * paletin döndürdüğü sorgu görünüme ve akıllı albüme olduğu gibi geçer.
+ */
+export interface SearchQuery {
+  persons?: { ids: number[]; mode?: "all" | "any" } | null;
+  place?: Record<string, unknown> | null;
+  time?: { from_utc?: number | null; to_utc?: number | null; year?: number | null; month?: number | null; day?: number | null } | null;
+  event_id?: number | null;
+  min_rating?: number | null;
+  favorite?: boolean | null;
+  color_labels?: string[];
+  camera_model?: string | null;
+  lens_model?: string | null;
+  text?: string | null;
+  limit?: number | null;
+  sort?: "relevance" | "taken_desc" | "taken_asc" | "rating_desc";
+}
+
+export type ChipKind = "person" | "place" | "event" | "rating" | "color" | "camera" | "lens" | "year" | "favorite";
+
+export interface Chip {
+  kind: ChipKind;
+  raw: string;
+  label: string;
+  ok: boolean;
+  error: string | null;
+}
+
+export interface Suggestion {
+  kind: ChipKind;
+  label: string;
+  /** Son belirtecin yerine yazılacak metin. */
+  insert: string;
+  detail: string | null;
+}
+
+export interface PaletteRequest {
+  input: string;
+  preview?: number;
+}
+
+export interface PaletteResult {
+  query: SearchQuery;
+  chips: Chip[];
+  suggestions: Suggestion[];
+  text: string | null;
+  searched: boolean;
+  total: number;
+  items: TileItem[];
+  semantic: boolean;
+  elapsedMs: number;
+}
+
+// ───────────────────────────── kişiler ─────────────────────────────
+
+export interface FaceRef {
+  faceId: number;
+  mediaId: number;
+  hash: string;
+  aspect: number;
+  /** Küçük resme göre 0..1. */
+  bbox: { x: number; y: number; w: number; h: number };
+}
+
+export interface PersonCard {
+  personId: number | null;
+  clusterId: number | null;
+  name: string | null;
+  faceCount: number;
+  photoCount: number;
+  cover: FaceRef | null;
+}
+
+export interface PeopleDto {
+  named: PersonCard[];
+  unnamed: PersonCard[];
+  ignored: number;
+}
+
+// ───────────────────────────── etkinlikler ─────────────────────────────
+
+export interface EventCard {
+  id: number;
+  title: string;
+  range: string;
+  startUtc: number;
+  endUtc: number;
+  count: number;
+  coverHash: string | null;
+  coverAspect: number;
+  place: string | null;
+  /** Kullanıcı kilidi: yeniden kümeleme dokunmaz. */
+  locked: boolean;
+  origin: "auto" | "manual";
+}
+
+// ───────────────────────────── yapay zekâ ─────────────────────────────
+
+export type ResourceMode = "quiet" | "balanced" | "full";
+
+export interface AiStatusDto {
+  mode: "off" | "mock" | "onnx";
+  reason: string | null;
+  semantic: boolean;
+  paused: boolean;
+  resourceMode: ResourceMode;
+  pending: { faces: number; clip: number; clustering: number };
+  facesDone: number;
+  clipDone: number;
+  images: number;
+}
+
+// ───────────────────────────── Wi-Fi eşleştirme ─────────────────────────────
+
+export interface PairingQrDto {
+  /** Tek kullanımlık belirteç içerir; günlüğe yazılmaz. */
+  uri: string;
+  /** Yalnızca `<rect>` ve `<path>`. */
+  svg: string;
+  expiresAtMs: number;
+  ttlSecs: number;
+  addrs: string[];
+  port: number;
+  name: string;
+}
+
+export type ConflictPolicy = "ask_user" | "replace_with_newer" | "keep_both" | "skip";
+
+export interface DeviceDto {
+  id: number;
+  name: string;
+  platform: string;
+  conflictPolicy: ConflictPolicy;
+  pairedAt: number;
+  lastSeenAt: number | null;
+  lastAddress: string | null;
+  revoked: boolean;
+  received: number;
+}
+
+// ───────────────────────────── bulut ─────────────────────────────
+
+export type CloudProvider = "s3" | "b2" | "r2" | "wasabi" | "webdav" | "local";
+
+export interface CloudTargetInput {
+  name: string;
+  provider: CloudProvider;
+  /** `endpoint`, `bucket`, `region`, `url`, `path`. */
+  config: Record<string, string>;
+  /** Güncellemede `null`: değişmez. */
+  user?: string | null;
+  secret?: string | null;
+  keyPrefix?: string;
+  encrypted?: boolean;
+  bandwidthMbps?: number | null;
+  enabled?: boolean;
+}
+
+export interface CloudTargetDto {
+  id: number;
+  name: string;
+  provider: CloudProvider;
+  config: Record<string, unknown>;
+  keyPrefix: string;
+  encrypted: boolean;
+  bandwidthMbps: number | null;
+  enabled: boolean;
+  hasCredentials: boolean;
+  user: string | null;
+}
+
+export interface EncryptionDto {
+  configured: boolean;
+  recipient: string | null;
+  fingerprint: string | null;
+  deviceKey: boolean;
+  createdAt: number | null;
+}
+
+export interface CloudSettingsDto {
+  targets: CloudTargetDto[];
+  globalBandwidthMbps: number | null;
+  encryption: EncryptionDto;
+  secretBackend: "secret-service" | "file";
+}
+
+export interface RecoveryDraftDto {
+  prefix: string;
+  groups: string[];
+  secret: string;
+  recipient: string;
+  /** Geri yazılacak grup numaraları (0'dan). */
+  challenge: number[];
+  replaces: boolean;
+}
+
+export interface RecoveryAnswer {
+  group: number;
+  value: string;
+}
+
+// ───────────────────────────── doğrulama ─────────────────────────────
+
+export interface VerifyRunDto {
+  id: number;
+  libraryId: number;
+  library: string;
+  trigger: "manual" | "scheduled" | "remount";
+  state: "running" | "paused" | "done" | "cancelled" | "failed";
+  total: number;
+  checked: number;
+  ok: number;
+  missing: number;
+  mismatched: number;
+  unreadable: number;
+  bytesRead: number;
+  startedAt: number;
+  finishedAt: number | null;
+}

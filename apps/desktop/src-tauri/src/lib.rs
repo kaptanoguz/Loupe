@@ -12,10 +12,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use loupe_app::{
-    AppConfig, AppCore, AppError, AppResult, CullRequest, CullResult, ImportRequest, ImportSessionDto, InspectorDetail,
-    LibraryDto, SidebarDto, StatusDto, TimelineRequest, TimelineSlice,
+    AiStatusDto, AppConfig, AppCore, AppError, AppResult, CloudSettingsDto, CloudTargetInput, CloudTargetStatusDto,
+    CullRequest, CullResult, DeviceDto, EncryptionDto, EventCard, FaceRef, ImportRequest, ImportSessionDto,
+    InspectorDetail, LibraryDto, PairingQrDto, PaletteRequest, PaletteResult, PeopleDto, RecoveryDraftDto, SidebarDto,
+    SmartAlbumDto, StatusDto, TimelineRequest, TimelineSlice, VerifyRunDto,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{Manager, Runtime, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -167,6 +169,263 @@ async fn get_status(state: State<'_, Desktop>) -> Cmd<StatusDto> {
     state.core.status().await
 }
 
+// ───────────────────────────── arama paleti ─────────────────────────────
+
+#[tauri::command]
+async fn search_palette(state: State<'_, Desktop>, req: PaletteRequest) -> Cmd<PaletteResult> {
+    blocking(&state, move |c| c.search_palette(&req)).await
+}
+
+#[tauri::command]
+async fn save_smart_album(
+    state: State<'_, Desktop>,
+    name: String,
+    query: loupe_app::SearchQuery,
+    pinned: Option<bool>,
+) -> Cmd<SmartAlbumDto> {
+    blocking(&state, move |c| c.save_smart_album(&name, &query, pinned.unwrap_or(false))).await
+}
+
+#[tauri::command]
+async fn delete_smart_album(state: State<'_, Desktop>, id: i64) -> Cmd<()> {
+    blocking(&state, move |c| c.delete_smart_album(id)).await
+}
+
+// ───────────────────────────── kişiler ─────────────────────────────
+
+#[tauri::command]
+async fn list_people(state: State<'_, Desktop>) -> Cmd<PeopleDto> {
+    blocking(&state, |c| c.people()).await
+}
+
+#[tauri::command]
+async fn person_faces(
+    state: State<'_, Desktop>,
+    person: Option<i64>,
+    cluster: Option<i64>,
+    limit: Option<u32>,
+) -> Cmd<Vec<FaceRef>> {
+    blocking(&state, move |c| c.person_faces(person, cluster, limit.unwrap_or(500))).await
+}
+
+#[tauri::command]
+async fn name_cluster(state: State<'_, Desktop>, cluster: i64, name: String) -> Cmd<i64> {
+    blocking(&state, move |c| c.name_cluster(cluster, &name)).await
+}
+
+#[tauri::command]
+async fn rename_person(state: State<'_, Desktop>, person: i64, name: String) -> Cmd<i64> {
+    blocking(&state, move |c| c.rename_person(person, &name)).await
+}
+
+#[tauri::command]
+async fn merge_clusters(state: State<'_, Desktop>, into: i64, from: Vec<i64>) -> Cmd<()> {
+    blocking(&state, move |c| c.merge_clusters(into, &from)).await
+}
+
+#[tauri::command]
+async fn merge_persons(state: State<'_, Desktop>, into: i64, from: Vec<i64>) -> Cmd<()> {
+    blocking(&state, move |c| c.merge_persons(into, &from)).await
+}
+
+#[tauri::command]
+async fn move_face(state: State<'_, Desktop>, face: i64, cluster: i64) -> Cmd<()> {
+    blocking(&state, move |c| c.move_face(face, cluster)).await
+}
+
+#[tauri::command]
+async fn assign_face(state: State<'_, Desktop>, face: i64, person: i64) -> Cmd<()> {
+    blocking(&state, move |c| c.assign_face(face, person)).await
+}
+
+#[tauri::command]
+async fn detach_face(state: State<'_, Desktop>, face: i64) -> Cmd<i64> {
+    blocking(&state, move |c| c.detach_face(face)).await
+}
+
+#[tauri::command]
+async fn reject_face(state: State<'_, Desktop>, face: i64) -> Cmd<()> {
+    blocking(&state, move |c| c.reject_face(face)).await
+}
+
+#[tauri::command]
+async fn ignore_cluster(state: State<'_, Desktop>, cluster: i64, ignored: bool) -> Cmd<()> {
+    blocking(&state, move |c| c.ignore_cluster(cluster, ignored)).await
+}
+
+// ───────────────────────────── etkinlikler ─────────────────────────────
+
+#[tauri::command]
+async fn list_events(state: State<'_, Desktop>) -> Cmd<Vec<EventCard>> {
+    blocking(&state, |c| c.events()).await
+}
+
+#[tauri::command]
+async fn rename_event(state: State<'_, Desktop>, id: i64, title: String) -> Cmd<EventCard> {
+    blocking(&state, move |c| c.rename_event(id, &title)).await
+}
+
+#[tauri::command]
+async fn exclude_from_event(state: State<'_, Desktop>, id: i64, media: Vec<i64>) -> Cmd<EventCard> {
+    blocking(&state, move |c| c.exclude_from_event(id, &media)).await
+}
+
+#[tauri::command]
+async fn set_event_locked(state: State<'_, Desktop>, id: i64, locked: bool) -> Cmd<EventCard> {
+    blocking(&state, move |c| c.set_event_locked(id, locked)).await
+}
+
+// ───────────────────────────── AI ve kaynaklar ─────────────────────────────
+
+#[tauri::command]
+async fn ai_status(state: State<'_, Desktop>) -> Cmd<AiStatusDto> {
+    blocking(&state, |c| c.ai_status()).await
+}
+
+#[tauri::command]
+async fn set_paused(state: State<'_, Desktop>, paused: bool) -> Cmd<AiStatusDto> {
+    blocking(&state, move |c| c.set_paused(paused)).await
+}
+
+#[tauri::command]
+async fn set_resource_mode(state: State<'_, Desktop>, mode: String) -> Cmd<AiStatusDto> {
+    blocking(&state, move |c| c.set_resource_mode(&mode)).await
+}
+
+// ───────────────────────────── Wi-Fi eşleşme ─────────────────────────────
+
+#[tauri::command]
+async fn pairing_qr(state: State<'_, Desktop>) -> Cmd<PairingQrDto> {
+    state.core.pairing_qr().await
+}
+
+#[tauri::command]
+async fn cancel_pairing(state: State<'_, Desktop>) -> Cmd<()> {
+    state.core.cancel_pairing().await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn list_devices(state: State<'_, Desktop>) -> Cmd<Vec<DeviceDto>> {
+    blocking(&state, |c| c.devices()).await
+}
+
+#[tauri::command]
+async fn revoke_device(state: State<'_, Desktop>, id: i64) -> Cmd<Vec<DeviceDto>> {
+    state.core.revoke_device(id).await
+}
+
+#[tauri::command]
+async fn set_conflict_policy(
+    state: State<'_, Desktop>,
+    id: i64,
+    policy: loupe_lan::ConflictPolicy,
+) -> Cmd<Vec<DeviceDto>> {
+    blocking(&state, move |c| c.set_conflict_policy(id, policy)).await
+}
+
+// ───────────────────────────── bulut ve şifreleme ─────────────────────────────
+
+#[tauri::command]
+async fn cloud_settings(state: State<'_, Desktop>) -> Cmd<CloudSettingsDto> {
+    blocking(&state, |c| c.cloud_settings()).await
+}
+
+#[tauri::command]
+async fn save_cloud_target(
+    state: State<'_, Desktop>,
+    id: Option<i64>,
+    input: CloudTargetInput,
+) -> Cmd<CloudSettingsDto> {
+    blocking(&state, move |c| c.save_cloud_target(id, &input)).await
+}
+
+#[tauri::command]
+async fn set_cloud_target_enabled(state: State<'_, Desktop>, id: i64, enabled: bool) -> Cmd<CloudSettingsDto> {
+    blocking(&state, move |c| c.set_cloud_target_enabled(id, enabled)).await
+}
+
+#[tauri::command]
+async fn delete_cloud_target(state: State<'_, Desktop>, id: i64) -> Cmd<CloudSettingsDto> {
+    blocking(&state, move |c| c.delete_cloud_target(id)).await
+}
+
+#[tauri::command]
+async fn set_global_bandwidth(state: State<'_, Desktop>, mbps: Option<f64>) -> Cmd<CloudSettingsDto> {
+    blocking(&state, move |c| c.set_global_bandwidth(mbps)).await
+}
+
+#[tauri::command]
+async fn start_cloud_sync(state: State<'_, Desktop>) -> Cmd<Vec<CloudTargetStatusDto>> {
+    blocking(&state, |c| c.start_cloud_sync()).await
+}
+
+#[tauri::command]
+async fn generate_recovery_key(state: State<'_, Desktop>) -> Cmd<RecoveryDraftDto> {
+    blocking(&state, |c| c.generate_recovery_key()).await
+}
+
+/// Bekleyen kurtarma anahtarını kullanıcının seçtiği dosyaya (`0600`) yazar.
+#[tauri::command]
+async fn export_recovery_key<R: Runtime>(app: tauri::AppHandle<R>, state: State<'_, Desktop>) -> Cmd<Option<String>> {
+    let handle = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        handle
+            .dialog()
+            .file()
+            .set_title("Kurtarma anahtarını kaydet")
+            .set_file_name("loupe-kurtarma-anahtari.txt")
+            .blocking_save_file()
+    })
+    .await
+    .map_err(|e| AppError::Join(e.to_string()))?;
+    let Some(path) = picked else { return Ok(None) };
+    let path = path.into_path().map_err(|e| AppError::Invalid(e.to_string()))?;
+    let shown = path.display().to_string();
+    blocking(&state, move |c| c.export_recovery_key(&path)).await?;
+    Ok(Some(shown))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Answer {
+    pub group: usize,
+    pub value: String,
+}
+
+#[tauri::command]
+async fn confirm_recovery_key(state: State<'_, Desktop>, answers: Vec<Answer>) -> Cmd<EncryptionDto> {
+    let answers: Vec<(usize, String)> = answers.into_iter().map(|a| (a.group, a.value)).collect();
+    blocking(&state, move |c| c.confirm_recovery_key(&answers)).await
+}
+
+#[tauri::command]
+async fn cancel_recovery_key(state: State<'_, Desktop>) -> Cmd<()> {
+    state.core.cancel_recovery_key();
+    Ok(())
+}
+
+#[tauri::command]
+async fn check_recovery_key(state: State<'_, Desktop>, key: String) -> Cmd<bool> {
+    blocking(&state, move |c| c.check_recovery_key(&key)).await
+}
+
+// ───────────────────────────── doğrulama ─────────────────────────────
+
+#[tauri::command]
+async fn verify_library(state: State<'_, Desktop>, library: Option<i64>) -> Cmd<Vec<i64>> {
+    blocking(&state, move |c| c.verify_library(library)).await
+}
+
+#[tauri::command]
+async fn cancel_verify(state: State<'_, Desktop>, library: Option<i64>) -> Cmd<usize> {
+    blocking(&state, move |c| c.cancel_verify(library)).await
+}
+
+#[tauri::command]
+async fn verify_runs(state: State<'_, Desktop>, limit: Option<u32>) -> Cmd<Vec<VerifyRunDto>> {
+    blocking(&state, move |c| c.verify_runs(limit.unwrap_or(10))).await
+}
+
 /// Komutları ve `thumb://` şemasını kurar (gerçek ve test çalışma zamanı için ortak).
 pub fn wire<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder
@@ -194,6 +453,46 @@ pub fn wire<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             set_rating_label_favorite,
             get_sidebar,
             get_status,
+            search_palette,
+            save_smart_album,
+            delete_smart_album,
+            list_people,
+            person_faces,
+            name_cluster,
+            rename_person,
+            merge_clusters,
+            merge_persons,
+            move_face,
+            assign_face,
+            detach_face,
+            reject_face,
+            ignore_cluster,
+            list_events,
+            rename_event,
+            exclude_from_event,
+            set_event_locked,
+            ai_status,
+            set_paused,
+            set_resource_mode,
+            pairing_qr,
+            cancel_pairing,
+            list_devices,
+            revoke_device,
+            set_conflict_policy,
+            cloud_settings,
+            save_cloud_target,
+            set_cloud_target_enabled,
+            delete_cloud_target,
+            set_global_bandwidth,
+            start_cloud_sync,
+            generate_recovery_key,
+            export_recovery_key,
+            confirm_recovery_key,
+            cancel_recovery_key,
+            check_recovery_key,
+            verify_library,
+            cancel_verify,
+            verify_runs,
         ])
 }
 

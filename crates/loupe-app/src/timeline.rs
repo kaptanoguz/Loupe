@@ -17,7 +17,7 @@ use crate::{AppError, AppResult};
 /// En büyük dilim (arayüz 100k'yı ~20 istekte alır).
 pub const MAX_SLICE: u32 = 5_000;
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum View {
     All,
@@ -34,7 +34,38 @@ pub enum View {
     SmartAlbum {
         id: i64,
     },
+    /// Arama paletinin sorgusu. Metin varsa sıralama alakaya göredir.
+    Search {
+        query: Box<loupe_search::SearchQuery>,
+    },
+    /// Tek kişinin fotoğrafları.
+    Person {
+        id: i64,
+    },
+    /// İsimsiz yüz kümesinin fotoğrafları.
+    Cluster {
+        id: i64,
+    },
+    /// Tek etkinliğin fotoğrafları (çekim sırasıyla).
+    Event {
+        id: i64,
+    },
 }
+
+impl View {
+    /// Alaka sıralaması gerektiren (CLIP/sözcük) sorgu.
+    pub fn ranked_query(&self, conn: &Connection) -> AppResult<Option<loupe_search::SearchQuery>> {
+        let q = match self {
+            Self::Search { query } => (**query).clone(),
+            Self::SmartAlbum { id } => loupe_search::albums::get(conn, loupe_search::SmartAlbumId(*id))?.query,
+            _ => return Ok(None),
+        };
+        Ok(q.text().is_some().then_some(q))
+    }
+}
+
+/// Alaka sırasıyla tek bölümün başlığı.
+pub const RANKED_TITLE: &str = "En alakalı";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -112,7 +143,7 @@ struct Plan {
     order: String,
 }
 
-fn plan(conn: &Connection, view: &View, grouping: Grouping) -> AppResult<Plan> {
+fn plan(conn: &Connection, view: &View, grouping: Grouping, ranked: Option<&[i64]>) -> AppResult<Plan> {
     let date_key = match grouping {
         Grouping::Day => format!("strftime('%Y-%m-%d', {LOCAL_SECONDS}, 'unixepoch')"),
         Grouping::Month => format!("strftime('%Y-%m', {LOCAL_SECONDS}, 'unixepoch')"),
@@ -127,16 +158,54 @@ fn plan(conn: &Connection, view: &View, grouping: Grouping) -> AppResult<Plan> {
         order: "m.taken_at_utc DESC, m.id DESC".into(),
     };
     let base = "m.soft_deleted_at IS NULL".to_owned();
+    if let Some(ids) = ranked {
+        let json = serde_json::to_string(ids).map_err(|e| AppError::Invalid(e.to_string()))?;
+        return Ok(Plan {
+            joins: "JOIN json_each(?1) r ON r.value = m.id".into(),
+            where_sql: base,
+            params: vec![Value::Text(json)],
+            key: "'r'".into(),
+            title: format!("'{RANKED_TITLE}'"),
+            subtitle: "NULL".into(),
+            order: "r.key".into(),
+        });
+    }
     Ok(match view {
         View::All => by_date(base, Vec::new()),
         View::Favorites => by_date(format!("{base} AND m.is_favorite = 1"), Vec::new()),
         View::Library { id } => by_date(format!("{base} AND m.library_id = ?1"), vec![Value::Integer(*id)]),
+        // Metinli sorgular `ranked` ile gelir; burada yalnızca süzgeçler.
         View::SmartAlbum { id } => {
             let album = loupe_search::albums::get(conn, loupe_search::SmartAlbumId(*id))?;
-            // Metin (CLIP) kuralı bu dilimde uygulanmaz: arama paleti Adım 3B'de.
             let compiled = loupe_search::compile::compile(&album.query);
             by_date(compiled.where_sql, compiled.params)
         }
+        View::Search { query } => {
+            query.validate()?;
+            let compiled = loupe_search::compile::compile(query);
+            by_date(compiled.where_sql, compiled.params)
+        }
+        View::Person { id } => by_date(
+            format!("{base} AND EXISTS (SELECT 1 FROM v_face_person v WHERE v.media_id = m.id AND v.person_id = ?1)"),
+            vec![Value::Integer(*id)],
+        ),
+        View::Cluster { id } => by_date(
+            format!(
+                "{base} AND EXISTS (SELECT 1 FROM faces f WHERE f.media_id = m.id AND f.cluster_id = ?1
+                                     AND f.is_rejected = 0)"
+            ),
+            vec![Value::Integer(*id)],
+        ),
+        View::Event { id } => Plan {
+            joins: "JOIN event_media em ON em.media_id = m.id AND em.source <> 'user_excluded' AND em.event_id = ?1"
+                .into(),
+            where_sql: base,
+            params: vec![Value::Integer(*id)],
+            key: date_key.clone(),
+            title: "NULL".into(),
+            subtitle: "NULL".into(),
+            order: "m.taken_at_utc ASC, m.id ASC".into(),
+        },
         View::Events => Plan {
             joins: "JOIN event_media em ON em.media_id = m.id AND em.source <> 'user_excluded'
                     JOIN events e ON e.id = em.event_id"
@@ -217,7 +286,7 @@ fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
 }
 
 /// `start:end` (UTC ms) → `12–15 Ekim 2026`.
-fn event_subtitle(raw: &str) -> Option<String> {
+pub(crate) fn event_subtitle(raw: &str) -> Option<String> {
     let (a, b) = raw.split_once(':')?;
     let day = |ms: i64| {
         let (y, m, d) = loupe_storage::layout::civil_from_days(ms.div_euclid(86_400_000));
@@ -326,12 +395,28 @@ fn items(conn: &Connection, p: &Plan, offset: u32, limit: u32) -> AppResult<Vec<
 
 /// Görünümün `offset..offset+limit` dilimi ve tüm bölümleri.
 pub fn slice(pool: &Pool, req: &TimelineRequest) -> AppResult<TimelineSlice> {
+    slice_ranked(pool, req, None)
+}
+
+/// `ranked`: aramanın alaka sırasıyla medya kimlikleri (tek bölüm, "En alakalı").
+pub fn slice_ranked(pool: &Pool, req: &TimelineRequest, ranked: Option<&[i64]>) -> AppResult<TimelineSlice> {
     if req.limit == 0 || req.limit > MAX_SLICE {
         return Err(AppError::Invalid(format!("dilim boyu 1–{MAX_SLICE} olmalı: {}", req.limit)));
     }
-    let dated = matches!(req.view, View::All | View::Favorites | View::Library { .. } | View::SmartAlbum { .. });
+    let dated = ranked.is_none()
+        && matches!(
+            req.view,
+            View::All
+                | View::Favorites
+                | View::Library { .. }
+                | View::SmartAlbum { .. }
+                | View::Search { .. }
+                | View::Person { .. }
+                | View::Cluster { .. }
+                | View::Event { .. }
+        );
     pool.read(|c| {
-        let p = plan(c, &req.view, req.grouping).map_err(to_db)?;
+        let p = plan(c, &req.view, req.grouping, ranked).map_err(to_db)?;
         let secs = sections(c, &p, dated).map_err(to_db)?;
         let total = secs.last().map_or(0, |s| s.start + s.count);
         let items = items(c, &p, req.offset, req.limit).map_err(to_db)?;
@@ -350,7 +435,7 @@ fn to_db(e: AppError) -> loupe_db::DbError {
 /// Bir görünümdeki medya sayısı (kenar çubuğu sayaçları).
 pub fn count(pool: &Pool, view: &View) -> AppResult<u64> {
     pool.read(|c| {
-        let p = plan(c, view, Grouping::Day).map_err(to_db)?;
+        let p = plan(c, view, Grouping::Day, None).map_err(to_db)?;
         let distinct = if matches!(view, View::People) { "DISTINCT m.id" } else { "*" };
         let n: i64 =
             c.query_row(&format!("SELECT count({distinct}) {}", p.from()), params_from_iter(p.params.iter()), |r| {

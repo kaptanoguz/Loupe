@@ -14,6 +14,11 @@ path = "src/lib.rs"
 name = "loupe"
 path = "src/main.rs"
 
+[features]
+default = []
+# Gerçek yüz ve CLIP modelleri (ONNX Runtime çalışma anında yüklenir).
+ort = ["loupe-app/ort"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

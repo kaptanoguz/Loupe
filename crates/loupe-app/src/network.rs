@@ -1,10 +1,10 @@
 //! Ağ servisleri: Wi-Fi LAN sunucusu (mDNS duyurusu, mTLS, tus) ve hedef
 //! başına bulut yedekleme döngüsü.
 //!
-//! Eşleşme QR'ı (ve onay penceresi) Adım 3B'dedir; bu yüzden şu an yeni
-//! telefon eşleşemez, yalnızca daha önce eşleşmiş cihazlar bağlanır. Bulut
-//! hedefi kimlik bilgisi ya da cihaz anahtarı eksikse `needs_setup` durumunda
-//! bekler, hiçbir şey yüklenmez.
+//! Telefon yalnızca masaüstünde eşleşme QR'ı açıkken eşleşebilir: tek
+//! kullanımlık belirteç QR üretilince doğar, 60 sn sonra ya da pencere
+//! kapanınca ölür ([`Network::pairing_qr`]). Bulut hedefi kimlik bilgisi ya da
+//! cihaz anahtarı eksikse `needs_setup` durumunda bekler, hiçbir şey yüklenmez.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -13,11 +13,12 @@ use std::time::Duration;
 
 use loupe_cloud::provider::Credentials;
 use loupe_cloud::targets::Target;
-use loupe_cloud::{BackupEngine, Keyring, LibraryRoots};
+use loupe_cloud::{BackupEngine, Keyring, LibraryRoots, TokenBucket};
 use loupe_core::{LibraryId, now_ms};
 use loupe_db::Pool;
 use loupe_lan::{
-    AutoApprove, Discovery, IdentityPem, LanConfig, LanServer, ServerIdentity, ServiceAd, SystemClock, Telemetry,
+    AutoApprove, ConflictPolicy, Discovery, IdentityPem, LanConfig, LanServer, ServerIdentity, ServiceAd, SystemClock,
+    Telemetry,
 };
 use serde::Serialize;
 use tokio::sync::Notify;
@@ -91,8 +92,86 @@ pub struct LanStatusDto {
     pub paired_devices: u64,
     pub active_uploads: u32,
     pub bytes_per_sec: f64,
+    pub bytes_expected: u64,
+    pub bytes_received: u64,
+    /// Kalan süre (sn); hız bilinmiyorsa `null`.
+    pub eta_secs: Option<u64>,
     pub verified_files: u64,
+    pub skipped: u64,
+    pub conflicts: u64,
+    pub failed: u64,
     pub error: Option<String>,
+}
+
+/// Eşleşme penceresindeki QR.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairingQrDto {
+    /// `loupe://pair?…` (tek kullanımlık belirteç içerir; günlüğe yazılmaz).
+    pub uri: String,
+    /// Yalnızca `<rect>` ve `<path>`: keskin, yüksek kontrastlı modüller.
+    pub svg: String,
+    pub expires_at_ms: i64,
+    pub ttl_secs: u64,
+    pub addrs: Vec<String>,
+    pub port: u16,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceDto {
+    pub id: i64,
+    pub name: String,
+    pub platform: String,
+    pub conflict_policy: ConflictPolicy,
+    pub paired_at: i64,
+    pub last_seen_at: Option<i64>,
+    pub last_address: Option<String>,
+    pub revoked: bool,
+    /// Bu cihazdan doğrulanarak gelen dosyalar.
+    pub received: u64,
+}
+
+/// Global bant genişliği ayarı (`cloud.global_bandwidth_bps`).
+pub const GLOBAL_BW_KEY: &str = "cloud.global_bandwidth_bps";
+
+/// QR modülünü SVG'ye çevirir: arka plan tek `<rect>`, koyu modüller tek `<path>`.
+/// Daire, gölge ya da yumuşatma yok (`shape-rendering="crispEdges"`).
+pub fn qr_svg(data: &str) -> AppResult<String> {
+    use qrcode::{Color, EcLevel, QrCode};
+    let code = QrCode::with_error_correction_level(data.as_bytes(), EcLevel::M)
+        .map_err(|e| AppError::Invalid(format!("QR: {e}")))?;
+    let w = code.width();
+    let quiet = 4;
+    let size = w + 2 * quiet;
+    let mut d = String::with_capacity(w * w * 4);
+    for (i, c) in code.to_colors().iter().enumerate() {
+        if *c == Color::Dark {
+            let (x, y) = (i % w + quiet, i / w + quiet);
+            d.push_str(&format!("M{x} {y}h1v1h-1z"));
+        }
+    }
+    Ok(format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {size} {size}\" shape-rendering=\"crispEdges\" \
+         role=\"img\" aria-label=\"Eşleşme QR kodu\"><rect width=\"{size}\" height=\"{size}\" fill=\"#ffffff\"/>\
+         <path d=\"{d}\" fill=\"#000000\"/></svg>"
+    ))
+}
+
+/// QR'a girecek yerel adresler: döngü dışı, özel ağ (Wi-Fi/Ethernet).
+#[must_use]
+pub fn local_addrs() -> Vec<std::net::IpAddr> {
+    let mut out: Vec<std::net::IpAddr> = if_addrs::get_if_addrs()
+        .map(|v| {
+            v.into_iter().map(|i| i.ip()).filter(|ip| !ip.is_loopback() && loupe_lan::server::is_lan(*ip)).collect()
+        })
+        .unwrap_or_default();
+    // IPv4 önce: telefonlar çoğunlukla onunla bağlanır.
+    out.sort_by_key(|ip| (ip.is_ipv6(), *ip));
+    out.dedup();
+    out.truncate(4);
+    out
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -126,6 +205,7 @@ pub struct Network {
     discovery: Mutex<Option<(Arc<dyn Discovery>, String)>>,
     cloud: Mutex<Vec<CloudWorker>>,
     wake: Arc<Notify>,
+    global_bw: Mutex<Option<Arc<TokenBucket>>>,
 }
 
 impl Network {
@@ -140,7 +220,95 @@ impl Network {
             discovery: Mutex::new(None),
             cloud: Mutex::new(Vec::new()),
             wake: Arc::new(Notify::new()),
+            global_bw: Mutex::new(None),
         }
+    }
+
+    #[must_use]
+    pub fn secrets(&self) -> &Arc<dyn SecretStore> {
+        &self.secrets
+    }
+
+    // ───────────────────────────── eşleşme ─────────────────────────────
+
+    /// Yeni tek kullanımlık belirteç ve QR (öncekini geçersiz kılar).
+    pub async fn pairing_qr(&self) -> AppResult<PairingQrDto> {
+        let guard = self.lan.lock().await;
+        let server = guard
+            .as_ref()
+            .ok_or_else(|| AppError::Invalid("LAN sunucusu kapalı: önce yönetilen bir kütüphane ekleyin".into()))?;
+        let mut addrs = local_addrs();
+        if addrs.is_empty() {
+            // Özel ağ adresi yok (ör. yalnızca döngü arayüzüne bağlı sunucu): dinlenen adres.
+            let ip = server.local_addr().ip();
+            if !ip.is_unspecified() {
+                addrs.push(ip);
+            }
+        }
+        if addrs.is_empty() {
+            return Err(AppError::Invalid("Wi-Fi ya da Ethernet adresi bulunamadı".into()));
+        }
+        let payload = server.pairing_payload(addrs.clone())?;
+        let uri = payload.to_uri();
+        Ok(PairingQrDto {
+            svg: qr_svg(&uri)?,
+            uri,
+            expires_at_ms: payload.expires_at_s * 1000,
+            ttl_secs: loupe_lan::PAIRING_TTL.as_secs(),
+            addrs: addrs.iter().map(ToString::to_string).collect(),
+            port: payload.port,
+            name: payload.name,
+        })
+    }
+
+    /// Eşleşme penceresi kapandı: belirteç hemen geçersiz.
+    pub async fn cancel_pairing(&self) {
+        if let Some(s) = self.lan.lock().await.as_ref() {
+            s.pairing().cancel();
+        }
+    }
+
+    pub fn devices(&self) -> AppResult<Vec<DeviceDto>> {
+        Ok(self.pool.read(|c| {
+            Ok(c.prepare_cached(
+                "SELECT d.id, d.name, d.platform, d.conflict_policy, d.paired_at, d.last_seen_at, d.last_address,
+                        d.revoked_at IS NOT NULL,
+                        (SELECT count(*) FROM device_assets a WHERE a.device_id = d.id)
+                   FROM devices d ORDER BY d.revoked_at IS NOT NULL, d.last_seen_at DESC, d.id DESC",
+            )?
+            .query_map([], |r| {
+                let policy: String = r.get(3)?;
+                Ok(DeviceDto {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    platform: r.get(2)?,
+                    conflict_policy: ConflictPolicy::from_db(&policy).unwrap_or(ConflictPolicy::AskUser),
+                    paired_at: r.get(4)?,
+                    last_seen_at: r.get(5)?,
+                    last_address: r.get(6)?,
+                    revoked: r.get(7)?,
+                    received: u64::try_from(r.get::<_, i64>(8)?).unwrap_or(0),
+                })
+            })?
+            .collect::<Result<_, _>>()?)
+        })?)
+    }
+
+    /// Cihazı iptal eder; çalışan sunucu sonraki el sıkışmayı reddeder.
+    pub async fn revoke_device(&self, id: i64) -> AppResult<()> {
+        let guard = self.lan.lock().await;
+        if let Some(s) = guard.as_ref() {
+            return Ok(s.revoke_device(id, "kullanıcı iptal etti").await?);
+        }
+        drop(guard);
+        let (pool, now) = (self.pool.clone(), now_ms());
+        loupe_lan::store::write_tx(&pool, |c| loupe_lan::store::revoke_device(c, id, "kullanıcı iptal etti", now))?;
+        Ok(())
+    }
+
+    pub fn set_conflict_policy(&self, id: i64, policy: ConflictPolicy) -> AppResult<()> {
+        loupe_lan::store::write_tx(&self.pool, |c| loupe_lan::store::set_conflict_policy(c, id, policy))?;
+        Ok(())
     }
 
     /// Telefonların geleceği kütüphane: birincil, yoksa ilk çevrimiçi yönetilen.
@@ -225,7 +393,13 @@ impl Network {
                     paired_devices: u64::try_from(paired).unwrap_or(0),
                     active_uploads: t.active_uploads,
                     bytes_per_sec: t.bytes_per_sec,
+                    bytes_expected: t.bytes_expected,
+                    bytes_received: t.bytes_received,
+                    eta_secs: if t.active_uploads == 0 { None } else { t.eta_secs },
                     verified_files: t.verified_files,
+                    skipped: t.skipped,
+                    conflicts: t.conflicts,
+                    failed: t.failed,
                     error: None,
                 }
             }
@@ -235,13 +409,19 @@ impl Network {
                 paired_devices: u64::try_from(paired).unwrap_or(0),
                 active_uploads: 0,
                 bytes_per_sec: 0.0,
+                bytes_expected: 0,
+                bytes_received: 0,
+                eta_secs: None,
                 verified_files: 0,
+                skipped: 0,
+                conflicts: 0,
+                failed: 0,
                 error: err.map(|e| e.1),
             },
         })
     }
 
-    fn credentials(&self, t: &Target) -> AppResult<Option<Credentials>> {
+    pub(crate) fn credentials(&self, t: &Target) -> AppResult<Option<Credentials>> {
         if t.secret_ref.is_empty() || t.provider == "local" {
             return Ok(None);
         }
@@ -254,8 +434,43 @@ impl Network {
             .map(|(user, secret)| Credentials { user, secret: zeroize::Zeroizing::new(secret) }))
     }
 
+    /// Hedef ayarı değişti: bütün döngüler durur ve güncel ayarlarla yeniden başlar.
+    pub fn restart_cloud(&self) -> AppResult<Vec<CloudTargetStatusDto>> {
+        if let Ok(mut workers) = self.cloud.lock() {
+            for w in workers.iter_mut() {
+                if let Some(t) = w.task.take() {
+                    t.abort();
+                }
+            }
+            workers.clear();
+        }
+        // Yarıda kesilen yüklemelerin kiraları bu süreçte: süre dolmasını beklemeden geri ver.
+        let owner = format!("{}/cloud-%", std::process::id());
+        loupe_cloud::queue::write_tx(&self.pool, |c| {
+            c.execute(
+                "UPDATE sync_status SET state = 'queued', updated_at = ?2
+                  WHERE state = 'uploading' AND (media_id, target_id) IN
+                        (SELECT media_id, target_id FROM sync_queue WHERE state = 'running' AND lease_owner LIKE ?1)",
+                rusqlite::params![owner, now_ms()],
+            )?;
+            c.execute(
+                "UPDATE sync_queue SET state = 'pending', lease_owner = NULL, lease_until = NULL,
+                        attempts = max(attempts - 1, 0), updated_at = ?2
+                  WHERE state = 'running' AND lease_owner LIKE ?1",
+                rusqlite::params![owner, now_ms()],
+            )?;
+            Ok(())
+        })?;
+        self.start_cloud()
+    }
+
     /// Etkin her hedef için bir yedekleme döngüsü başlatır.
     pub fn start_cloud(&self) -> AppResult<Vec<CloudTargetStatusDto>> {
+        let global = crate::ai::get_setting(&self.pool, GLOBAL_BW_KEY)?
+            .and_then(|v| v.as_u64())
+            .filter(|&b| b > 0)
+            .map(|b| Arc::new(TokenBucket::per_second(b)));
+        *self.global_bw.lock().map_err(|_| AppError::Poisoned)? = global;
         let ids: Vec<i64> = self.pool.read(|c| {
             Ok(c.prepare("SELECT id FROM cloud_targets WHERE enabled = 1 ORDER BY id")?
                 .query_map([], |r| r.get(0))?
@@ -305,13 +520,17 @@ impl Network {
             _ => None,
         };
         let provider = loupe_cloud::provider::from_target(&target.provider, &target.config, creds)?;
-        Ok(Some(BackupEngine::new(
+        let mut engine = BackupEngine::new(
             self.pool.clone(),
             provider,
             target,
             keyring,
             Arc::new(SharedRoots(self.libraries.clone())),
-        )?))
+        )?;
+        if let Some(b) = self.global_bw.lock().map_err(|_| AppError::Poisoned)?.clone() {
+            engine = engine.with_global_limit(b);
+        }
+        Ok(Some(engine))
     }
 
     /// Yeni medyayı çalışan her hedefin kuyruğuna koyar ve döngüleri uyandırır.

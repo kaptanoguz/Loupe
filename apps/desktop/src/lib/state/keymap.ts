@@ -14,7 +14,8 @@ export type Action =
   | { type: "loupe" }
   | { type: "loupeZoom" }
   | { type: "close" }
-  | { type: "zoom"; delta: 1 | -1 };
+  | { type: "zoom"; delta: 1 | -1 }
+  | { type: "palette" };
 
 /** 6–9: kırmızı, sarı, yeşil, mavi (Lightroom sırası). */
 export const DIGIT_LABELS: Record<string, ColorLabel> = { "6": "red", "7": "yellow", "8": "green", "9": "blue" };
@@ -38,6 +39,7 @@ export function keyToAction(e: KeyLike, ctx: KeyContext): Action | null {
   if (mod) {
     if (e.key === "=" || e.key === "+") return { type: "zoom", delta: 1 };
     if (e.key === "-") return { type: "zoom", delta: -1 };
+    if (e.key === "k" || e.key === "K") return { type: "palette" };
     return null;
   }
   if (e.altKey) return null;
