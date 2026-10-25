@@ -80,7 +80,7 @@ fn migrations_apply_once_and_pragmas_hold() {
     {
         let pool = Pool::open(&path, PoolConfig::default()).unwrap();
         let r = pool.migration_report();
-        assert_eq!((r.from_version, r.to_version, r.applied.clone()), (0, 3, vec![1, 2, 3]));
+        assert_eq!((r.from_version, r.to_version, r.applied.clone()), (0, 4, vec![1, 2, 3, 4]));
         pool.write(|c| {
             let mode: String = c.query_row("PRAGMA journal_mode", [], |r| r.get(0))?;
             let sync: i64 = c.query_row("PRAGMA synchronous", [], |r| r.get(0))?;
@@ -102,7 +102,7 @@ fn migrations_apply_once_and_pragmas_hold() {
     }
     let pool = Pool::open(&path, PoolConfig::default()).unwrap();
     let r = pool.migration_report();
-    assert_eq!((r.from_version, r.to_version, r.applied.len()), (3, 3, 0));
+    assert_eq!((r.from_version, r.to_version, r.applied.len()), (4, 4, 0));
 }
 
 #[test]
@@ -124,7 +124,7 @@ fn newer_schema_is_rejected() {
     let c = rusqlite::Connection::open(&path).unwrap();
     c.pragma_update(None, "user_version", 99).unwrap();
     drop(c);
-    assert!(matches!(Pool::open(&path, PoolConfig::default()), Err(DbError::SchemaTooNew { found: 99, known: 3 })));
+    assert!(matches!(Pool::open(&path, PoolConfig::default()), Err(DbError::SchemaTooNew { found: 99, known: 4 })));
 }
 
 #[test]
@@ -406,4 +406,46 @@ fn batch_chunk_failure_rolls_back_only_that_chunk() {
     rows[650].rel_path = rows[10].rel_path.clone();
     assert!(pool.write(|c| insert_media_batch(c, &rows)).is_err());
     assert_eq!(pool.read(|c| media::count(c, lib)).unwrap(), 500, "ilk parça kalıcı, ikinci parça geri alınmış");
+}
+
+#[test]
+fn migration_0004_maps_pending_thumb_jobs_to_new_size_classes() {
+    use loupe_db::{ConnectionConfig, MIGRATIONS, Role, open_connection};
+    let dir = tempfile::tempdir().unwrap();
+    let c = open_connection(&dir.path().join("v3.db"), Role::Writer, &ConnectionConfig::default()).unwrap();
+    for m in &MIGRATIONS[..3] {
+        c.execute_batch(m.sql).unwrap();
+    }
+    let lib = library::insert(&c, &new_library("Ana", true)).unwrap();
+    let id = match media::insert(&c, &media_row(lib, 1)).unwrap() {
+        CommitOutcome::Inserted(id) | CommitOutcome::Duplicate(id) => id,
+    };
+    for (variant, prio) in [("grid", 0), ("preview", 2), ("full", 5)] {
+        c.execute(
+            "INSERT INTO jobs (kind, media_id, variant, base_priority, run_after, created_at, updated_at)
+             VALUES ('thumb', ?1, ?2, ?3, 0, 0, 0)",
+            rusqlite::params![id.0, variant, prio],
+        )
+        .unwrap();
+    }
+    c.execute_batch(MIGRATIONS[3].sql).unwrap();
+
+    let got: Vec<(String, i64)> = c
+        .prepare("SELECT variant, base_priority FROM jobs ORDER BY base_priority")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(got, vec![("sm".into(), 0), ("md".into(), 2), ("lg".into(), 5)]);
+    let user_version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+    assert_eq!(user_version, 4);
+    // Eski sınıf adları artık kabul edilmez.
+    let bad = c.execute(
+        "INSERT INTO jobs (kind, media_id, variant, base_priority, run_after, created_at, updated_at)
+         VALUES ('thumb', ?1, 'grid', 0, 0, 0, 0)",
+        [id.0],
+    );
+    assert!(bad.is_err());
+    loupe_db::validate_schema(&c).unwrap();
 }

@@ -41,11 +41,13 @@ export const FAST_SCROLL_SCREENS_PER_S = 4;
 export const VIEWPORT_REPORT_INTERVAL_MS = 100;
 
 /**
- * Küçük resim boyut sınıfları (px, cihaz pikseli).
- * grid: yükseklik; preview/full: uzun kenar. Seçim: gereken = satırYüksekliği × devicePixelRatio;
- * gereken ≤ grid ise grid, değilse preview. full yalnızca QuickLook ve tam ekran.
+ * Küçük resim boyut sınıfları (px, cihaz pikseli, uzun kenar). Adım 2B'den itibaren
+ * loupe-media `ThumbSize` ve şemadaki `thumbnails.size_class` ile aynı.
+ * Seçim: gereken = satırYüksekliği × devicePixelRatio; gereken ≤ sm ise sm,
+ * ≤ md ise md, değilse lg. lg yalnızca QuickLook ve tam ekran.
+ * URI: thumb://<sınıf>/<blake3 hex>
  */
-export const THUMB_PX = { grid: 512, preview: 1600, full: 2560 } as const;
+export const THUMB_PX = { sm: 256, md: 768, lg: 1920 } as const;
 export type ThumbClass = keyof typeof THUMB_PX;
 
 /** Kontrol yüksekliği, araç çubuğu, durum çubuğu, paneller (px). */

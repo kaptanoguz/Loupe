@@ -1,0 +1,9 @@
+TR.34	Istanbul	Istanbul	
+TR.50	Nevşehir	Nevşehir	
+TR.68	Ankara	Ankara	
+DE.16	Berlin	Berlin	
+AR.07	Buenos Aires F.D.	Buenos Aires F.D.	
+RU.15	Chukotka	Chukotka	
+FJ.01	Central	Central	
+FJ.02	Eastern	Eastern	
+FJ.03	Northern	Northern	
