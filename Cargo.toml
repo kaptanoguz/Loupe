@@ -1,0 +1,46 @@
+[workspace]
+resolver = "3"
+members = ["crates/loupe-core", "crates/loupe-db", "crates/loupe-storage"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/kaptanoguz/Magic-Photo"
+
+[workspace.dependencies]
+loupe-core = { path = "crates/loupe-core" }
+loupe-db = { path = "crates/loupe-db" }
+loupe-storage = { path = "crates/loupe-storage" }
+
+blake3 = "1.8"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+notify-debouncer-full = "0.7"
+rusqlite = { version = "0.41", features = ["bundled", "hooks", "functions"] }
+rustix = { version = "1.1", features = ["fs"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlite-vec = "0.1.9"
+tempfile = "3"
+thiserror = "2"
+unicode-normalization = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Üretim kodunda panik yok: unwrap/expect/panic derlemeyi kırar.
+# Testlerde serbest (clippy.toml: allow-*-in-tests).
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+
+[workspace.lints.rust]
+# Tek istisna: sqlite-vec'in statik kaydı (loupe-db/src/vec_ext.rs).
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+
+[profile.dev.package."*"]
+# SQLite, BLAKE3 ve görüntü çözme testlerde de hızlı çalışsın.
+opt-level = 2

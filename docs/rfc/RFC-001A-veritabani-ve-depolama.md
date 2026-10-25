@@ -48,9 +48,9 @@ $XDG_CACHE_HOME/loupe/thumbs/
 ├── .loupe/
 │   ├── library.json                        # { "uuid": "…", "schema": 1, "created_at": … }
 │   ├── lock                                # flock: tek yazar (V6)
-│   ├── staging/                            # atomic write geçici alanı (AYNI dosya sistemi)
 │   ├── quarantine/                         # verify'da bozuk bulunan dosyalar
 │   └── manifest.jsonl                      # periyodik, okunabilir katalog dökümü
+├── .loupe-tmp/                             # atomic write geçici alanı (AYNI dosya sistemi; Adım 2A)
 └── 2026/10/24/
     ├── DSC_0412.NEF
     ├── DSC_0412.xmp                        # puan, renk etiketi, anahtar kelime, kişi bölgeleri
@@ -335,7 +335,7 @@ flowchart TD
 
 - **Neden iki kaynak:** udisks2 çoğu masaüstünde var ve aygıt kimliğini doğrudan verir; ama sunucu kurulumlarında veya `fstab` ile bağlanan NAS'larda olmayabilir. `mountinfo` her durumda çalışır.
 - **Neden işaret dosyası:** Aynı UUID'ye sahip disk klonları ve bağlanmamış bir mount noktasına (boş dizin) yazma riski. `library.json` yoksa uygulama **asla** o dizine yazmaz.
-- **Yetenek testi** (`.loupe/staging` içinde, bağlanınca bir kez): `link()` denemesi → `supports_hardlink`; `renameat2(RENAME_NOREPLACE)` denemesi → `supports_noreplace` (`EINVAL` ise yok); fs tipi `nfs*`/`cifs`/`fuse.*` ise `supports_inotify = 0` ve `watch_mode = poll`.
+- **Yetenek testi** (`.loupe-tmp/` içinde, bağlanınca bir kez): `link()` denemesi → `supports_hardlink`; `renameat2(RENAME_NOREPLACE)` denemesi → `supports_noreplace` (`EINVAL` ise yok); fs tipi `nfs*`/`cifs`/`fuse.*` ise `supports_inotify = 0` ve `watch_mode = poll`.
 
 ### 3.4 Import: Kopyala / Taşı / Hardlink (`loupe-ingest`)
 
@@ -409,7 +409,7 @@ sequenceDiagram
 
   W->>FS: flock(.loupe/lock, LOCK_EX | LOCK_NB) (oturum boyunca)
   W->>FS: statvfs: boş alan yeterli mi?
-  W->>FS: open(staging/{uuid}.part, O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644)
+  W->>FS: open(.loupe-tmp/{uuid}.part, O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0644)
   W->>FS: fallocate(boyut) (destekleniyorsa: parçalanmayı ve ENOSPC sürprizini önler)
   loop 1 MiB bloklar
     S->>W: read
@@ -440,7 +440,7 @@ sequenceDiagram
 
 | Kesinti anı | Diskte | Açılışta |
 |---|---|---|
-| Yazma sırasında | Yarım `staging/*.part` | `staging/` temizlenir; kaynak yerinde, import oturumu `hashed`'den devam eder. |
+| Yazma sırasında | Yarım `.loupe-tmp/*.part` | `.loupe-tmp/` temizlenir; kaynak yerinde, import oturumu `hashed`'den devam eder. |
 | `fsync` sonrası, `rename` öncesi | Tam `.part` | Temizlenir, yeniden yazılır. |
 | `rename` sonrası, DB commit öncesi | Hedefte tam ve doğrulanmış dosya, kayıt yok | Uzlaştırma taraması bulur, hash'ler, kayıt ekler (`import_items` `placed` → `committed`). **Kayıp yok.** |
 | DB commit sırasında | Dosya yerinde; WAL yarım | SQLite yarım transaction'ı geri alır → yukarıdaki satır. |
@@ -539,7 +539,7 @@ flowchart TD
 
 ### 3.9 Test stratejisi (Adım 2'de yazılacak)
 
-- **Çökme enjeksiyonu:** `AtomicWriter` ve import durum makinesinin her adımından sonra süreci `SIGKILL` ile öldüren, ardından yeniden açılışta şu değişmezleri doğrulayan test seti: (1) DB'deki her `media_files` satırının dosyası var ve hash'i doğru, (2) `staging/` boş, (3) hiçbir kaynak dosya `committed` olmadan silinmemiş.
+- **Çökme enjeksiyonu:** `AtomicWriter` ve import durum makinesinin her adımından sonra süreci `SIGKILL` ile öldüren, ardından yeniden açılışta şu değişmezleri doğrulayan test seti: (1) DB'deki her `media_files` satırının dosyası var ve hash'i doğru, (2) `.loupe-tmp/` boş, (3) hiçbir kaynak dosya `committed` olmadan silinmemiş.
 - **Dosya sistemi matrisi:** Aynı testler `ext4`, `btrfs`, `exfat` ve `vfat` loop cihazlarında (CI'da `losetup`).
 - **Özellik tabanlı testler** (`proptest`): `RelPath` ayrıştırıcısı, düzen şablonu, ad çakışması çözümü.
 - **İzleyici:** Hızlı ardışık rename, aynı anda 10.000 dosya bırakma, `Q_OVERFLOW` simülasyonu.

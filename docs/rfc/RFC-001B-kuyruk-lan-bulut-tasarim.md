@@ -199,10 +199,10 @@ sequenceDiagram
 |---|---|---|---|---|---|
 | RetinaFace-R50 (zayıf CPU: MobileNet-0.25) | Yüz tespiti + 5 nokta | 640 px | fp32 | ~110 MB (MobileNet ~2 MB) | Yüz işi varken |
 | ArcFace R100 | 512-d yüz vektörü | 112×112 hizalı | fp16 | ~130 MB | Yüz işi varken |
-| Multilingual-CLIP görüntü kodlayıcı (ViT-B/16+) | 640-d görüntü vektörü | 240 px | fp16 | ~200 MB | CLIP işi varken |
-| Multilingual-CLIP metin kodlayıcı (XLM-R Large) | Sorgu vektörü | metin | int8 | ~600 MB | **Yalnızca arama yapılırken** |
+| M-CLIP görüntü kodlayıcı (ViT-B/32) | 512-d görüntü vektörü | 224 px | fp16 | ~200 MB | CLIP işi varken |
+| M-CLIP metin kodlayıcı (XLM-R Large) | 512-d sorgu vektörü | metin | int8 | ~600 MB | **Yalnızca arama yapılırken** |
 
-> **Şema notu:** 0001'deki `vec_media_clip` 768 boyut olarak tanımlandı. Seçilen kodlayıcının çıkış boyutu farklıysa (ör. ViT-B/16+ için 640) Adım 2'de model kesinleşince sanal tablo yeni bir migrasyonla doğru boyutta yeniden oluşturulur; `ml_models.dim` bu kontrolün tek kaynağıdır.
+> **Şema notu (PR #2 kararı):** Model M-CLIP `XLM-Roberta-Large-Vit-B-32`; iki kodlayıcı da 512 boyutlu ortak uzaya izdüşürür. 0001'deki 768 yanlıştı; migrasyon `0003_clip_dim.sql` `vec_media_clip`'i `float[512]` olarak yeniden oluşturur. Rust tarafındaki tek kaynak `loupe_db::CLIP_DIM = 512`; açılışta şema doğrulaması tablo tanımını bu sabitle karşılaştırır, uyuşmazsa veritabanı açılmaz.
 
 ```mermaid
 stateDiagram-v2
@@ -351,7 +351,7 @@ Uç noktalar (`/v1` altında, hepsi mTLS gerektirir):
 
 tus uzantıları: `creation`, `checksum` (algoritma `blake3`; `Tus-Checksum-Algorithm: blake3,sha1`), `termination`, `expiration` (7 gün). HTTP/2 tek bağlantıda çoklama sağlar; telefon **aynı anda 2 dosya** yükler (Wi-Fi'da tek akış genellikle bağlantıyı doyurmaz).
 
-**Sunucu tarafı yazma kuralı:** Parça → parça hash'i doğrulanır → `.part` dosyasına yazılır → `fsync` → **sonra** `lan_transfers.offset_bytes` güncellenir. Sunucunun söylediği offset diskte gerçekten vardır; elektrik kesintisinde bile. `.part` dosyası hedef kütüphanenin `.loupe/staging/` dizinindedir (RFC-001A §3.5); bitince yalnızca `rename` yapılır, kopya yok.
+**Sunucu tarafı yazma kuralı:** Parça → parça hash'i doğrulanır → `.part` dosyasına yazılır → `fsync` → **sonra** `lan_transfers.offset_bytes` güncellenir. Sunucunun söylediği offset diskte gerçekten vardır; elektrik kesintisinde bile. `.part` dosyası hedef kütüphanenin `.loupe-tmp/` dizinindedir (RFC-001A §3.5); bitince yalnızca `rename` yapılır, kopya yok.
 
 **Kaynak sınırları:** Parça en fazla 8 MiB, istek gövdesi zaman aşımı 30 sn, cihaz başına en fazla 4 aktif yükleme, staging kotası kütüphane boş alanının %5'i.
 
@@ -689,4 +689,4 @@ N_düğüm ≈ (V + 2·O) / (Hₜ + g) × (W / (Hₜ · ā))
 | K4 | Uzak silme | Yerel kalıcı silmeden 30 gün sonra |
 | K5 | Varsayılan kaynak modu | Dengeli (CPU %50, AI iş parçacığı = çekirdek ÷ 2) |
 | K6 | Varsayılan yakınlaştırma | 180px satır yüksekliği |
-| K7 | CLIP modeli | Multilingual-CLIP (XLM-R Large + ViT-B/16+); kesin boyut Adım 2'de ölçülüp `vec_media_clip` buna göre ayarlanır |
+| K7 | CLIP modeli | **Karar verildi:** M-CLIP XLM-R Large + ViT-B/32, 512-d (migrasyon 0003, `CLIP_DIM`) |
