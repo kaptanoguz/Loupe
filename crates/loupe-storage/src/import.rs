@@ -32,7 +32,7 @@ use crate::fsutil::{LibraryLock, create_dir_all_durable, drop_page_cache, fsync_
 use crate::hash::{FileDigest, HashOptions, hash_file, hash_reader};
 use crate::layout::{DateResolver, MtimeResolver, candidate_name, render_dir};
 use crate::volume::LibraryMarker;
-use crate::{StorageError, TMP_DIR};
+use crate::{LAN_STAGING_DIR, LOUPE_DIR, StorageError, TMP_DIR};
 
 #[derive(Debug, Clone)]
 pub struct ImporterConfig {
@@ -188,12 +188,33 @@ impl Importer {
         mode: ImportMode,
         session: Option<ImportSessionId>,
     ) -> Result<ImportOutcome, StorageError> {
+        self.import_file_as(catalog, src, mode, session, mode.into())
+    }
+
+    /// LAN aktarımının staging dizini: `<kök>/.loupe/lan-staging/`. Kütüphaneyle
+    /// aynı dosya sisteminde olduğu için tamamlanan yükleme yalnızca `rename` ile
+    /// yerine geçer. Bu dizin, "kaynak kütüphane içinde olamaz" kuralının tek istisnasıdır.
+    #[must_use]
+    pub fn lan_staging_dir(&self) -> PathBuf {
+        self.root.join(LOUPE_DIR).join(LAN_STAGING_DIR)
+    }
+
+    /// [`Self::import_file`] ile aynı, ama `media_files.placement` değeri açıkça
+    /// verilir (LAN'dan gelen dosya `Placement::Lan` ve `ImportMode::Move` ile).
+    pub fn import_file_as<C: ImportCatalog>(
+        &self,
+        catalog: &mut C,
+        src: &Path,
+        mode: ImportMode,
+        session: Option<ImportSessionId>,
+        placement: Placement,
+    ) -> Result<ImportOutcome, StorageError> {
         let src_meta = fs::symlink_metadata(src).map_err(StorageError::io("stat", src))?;
         if !src_meta.is_file() {
             return Err(StorageError::NotAFile(src.to_path_buf()));
         }
         let src = fs::canonicalize(src).map_err(StorageError::io("yol çözme", src))?;
-        if src.starts_with(&self.root) {
+        if src.starts_with(&self.root) && !src.starts_with(self.lan_staging_dir()) {
             return Err(StorageError::SourceInsideLibrary(src));
         }
         let file_name =
@@ -241,7 +262,7 @@ impl Importer {
             library_id: self.cfg.library_id,
             rel_path: rel_path.clone(),
             original_filename: file_name,
-            placement: mode.into(),
+            placement,
             import_session_id: session,
             file_type: kind.file_type,
             raw_format: kind.raw_format.map(str::to_owned),
@@ -282,13 +303,7 @@ impl Importer {
             ImportMode::Move => remove_source(&src).is_ok(),
             ImportMode::Copy | ImportMode::Hardlink => false,
         };
-        Ok(ImportOutcome::Imported {
-            media_id,
-            rel_path,
-            placement: mode.into(),
-            blake3: digest.blake3,
-            source_removed,
-        })
+        Ok(ImportOutcome::Imported { media_id, rel_path, placement, blake3: digest.blake3, source_removed })
     }
 
     fn tmp_path(&self, ext: &str) -> PathBuf {

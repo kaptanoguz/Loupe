@@ -80,7 +80,7 @@ fn migrations_apply_once_and_pragmas_hold() {
     {
         let pool = Pool::open(&path, PoolConfig::default()).unwrap();
         let r = pool.migration_report();
-        assert_eq!((r.from_version, r.to_version, r.applied.clone()), (0, 5, vec![1, 2, 3, 4, 5]));
+        assert_eq!((r.from_version, r.to_version, r.applied.clone()), (0, 6, vec![1, 2, 3, 4, 5, 6]));
         pool.write(|c| {
             let mode: String = c.query_row("PRAGMA journal_mode", [], |r| r.get(0))?;
             let sync: i64 = c.query_row("PRAGMA synchronous", [], |r| r.get(0))?;
@@ -102,7 +102,7 @@ fn migrations_apply_once_and_pragmas_hold() {
     }
     let pool = Pool::open(&path, PoolConfig::default()).unwrap();
     let r = pool.migration_report();
-    assert_eq!((r.from_version, r.to_version, r.applied.len()), (5, 5, 0));
+    assert_eq!((r.from_version, r.to_version, r.applied.len()), (6, 6, 0));
 }
 
 #[test]
@@ -124,7 +124,7 @@ fn newer_schema_is_rejected() {
     let c = rusqlite::Connection::open(&path).unwrap();
     c.pragma_update(None, "user_version", 99).unwrap();
     drop(c);
-    assert!(matches!(Pool::open(&path, PoolConfig::default()), Err(DbError::SchemaTooNew { found: 99, known: 5 })));
+    assert!(matches!(Pool::open(&path, PoolConfig::default()), Err(DbError::SchemaTooNew { found: 99, known: 6 })));
 }
 
 #[test]
@@ -450,5 +450,66 @@ fn migration_0004_maps_pending_thumb_jobs_to_new_size_classes() {
     for m in &MIGRATIONS[4..] {
         c.execute_batch(m.sql).unwrap();
     }
+    loupe_db::validate_schema(&c).unwrap();
+}
+
+#[test]
+fn migration_0006_keeps_sync_rows_and_accepts_local_targets() {
+    use loupe_db::{ConnectionConfig, MIGRATIONS, Role, open_connection};
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = open_connection(&dir.path().join("v5.db"), Role::Writer, &ConnectionConfig::default()).unwrap();
+    for m in &MIGRATIONS[..5] {
+        c.execute_batch(m.sql).unwrap();
+    }
+    let lib = library::insert(&c, &new_library("Ana", true)).unwrap();
+    let id = match media::insert(&c, &media_row(lib, 1)).unwrap() {
+        CommitOutcome::Inserted(id) | CommitOutcome::Duplicate(id) => id,
+    };
+    c.execute_batch(
+        "INSERT INTO cloud_targets (name, provider, config, secret_ref, created_at, updated_at)
+         VALUES ('B2', 'b2', '{}', 'loupe/b2', 0, 0)",
+    )
+    .unwrap();
+    c.execute(
+        "INSERT INTO sync_status (media_id, target_id, state, local_checksum, updated_at)
+         VALUES (?1, 1, 'queued', randomblob(32), 0)",
+        [id.0],
+    )
+    .unwrap();
+    c.execute(
+        "INSERT INTO sync_queue (target_id, media_id, op, run_after, created_at, updated_at)
+         VALUES (1, ?1, 'upload', 0, 0, 0)",
+        [id.0],
+    )
+    .unwrap();
+
+    // Gerçek motor gibi: foreign_keys açık, tek transaction.
+    let tx = c.transaction().unwrap();
+    tx.execute_batch(MIGRATIONS[5].sql).unwrap();
+    tx.commit().unwrap();
+
+    let kept: (i64, i64) = c
+        .query_row("SELECT (SELECT count(*) FROM sync_status), (SELECT count(*) FROM sync_queue)", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .unwrap();
+    assert_eq!(kept, (1, 1), "çocuk satırlar yeniden kurulumdan sağ çıkmalı");
+    c.execute_batch(
+        "INSERT INTO cloud_targets (name, provider, config, secret_ref, created_at, updated_at)
+         VALUES ('NAS', 'local', '{\"path\":\"/mnt/nas\"}', 'loupe/nas', 0, 0)",
+    )
+    .unwrap();
+    // CASCADE hâlâ yeni tabloya bağlı.
+    c.execute("DELETE FROM cloud_targets WHERE id = 1", []).unwrap();
+    let left: i64 = c.query_row("SELECT count(*) FROM sync_status", [], |r| r.get(0)).unwrap();
+    assert_eq!(left, 0);
+    let fk: Vec<String> = c
+        .prepare("PRAGMA foreign_key_check")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert!(fk.is_empty());
     loupe_db::validate_schema(&c).unwrap();
 }
