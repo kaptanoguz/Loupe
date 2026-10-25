@@ -10,9 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
+      # Sürüm rust-toolchain.toml'dan gelir; yerel ve CI aynı clippy'yi kullanır.
+      - run: rustup show active-toolchain
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings

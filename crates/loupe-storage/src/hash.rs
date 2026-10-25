@@ -167,7 +167,7 @@ mod tests {
     fn scene(seed: u32) -> DynamicImage {
         DynamicImage::ImageRgb8(ImageBuffer::from_fn(320, 240, |x, y| {
             let v = ((x * seed + y * 3) % 256) as u8;
-            let w = if (x / 40 + y / (30 + seed)) % 2 == 0 { 220 } else { 30 };
+            let w = if (x / 40 + y / (30 + seed)).is_multiple_of(2) { 220 } else { 30 };
             Rgb([v, w, ((x + y) % 256) as u8])
         }))
     }

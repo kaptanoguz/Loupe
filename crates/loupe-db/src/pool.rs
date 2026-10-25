@@ -87,10 +87,10 @@ impl Pool {
 
     fn give_back(&self, conn: Connection) {
         // Kilit zehirliyse veya havuz doluysa bağlantı kapanır; hata yaymaya gerek yok.
-        if let Ok(mut idle) = self.readers.lock() {
-            if idle.len() < self.cfg.max_idle_readers {
-                idle.push(conn);
-            }
+        if let Ok(mut idle) = self.readers.lock()
+            && idle.len() < self.cfg.max_idle_readers
+        {
+            idle.push(conn);
         }
     }
 }

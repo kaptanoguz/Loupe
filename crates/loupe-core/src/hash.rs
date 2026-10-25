@@ -17,7 +17,7 @@ impl Blake3Hash {
             return Err(CoreError::InvalidHashHex(hex.to_owned()));
         }
         let mut out = [0u8; 32];
-        for (dst, pair) in out.iter_mut().zip(raw.chunks_exact(2)) {
+        for (dst, pair) in out.iter_mut().zip(raw.as_chunks::<2>().0) {
             let hi = hex_digit(pair[0]).ok_or_else(|| CoreError::InvalidHashHex(hex.to_owned()))?;
             let lo = hex_digit(pair[1]).ok_or_else(|| CoreError::InvalidHashHex(hex.to_owned()))?;
             *dst = (hi << 4) | lo;

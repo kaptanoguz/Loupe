@@ -42,14 +42,14 @@ fn unescape_octal(s: &str) -> String {
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'\\' {
-            if let Some(oct) = b.get(i + 1..i + 4).filter(|o| o.iter().all(|c| (b'0'..=b'7').contains(c))) {
-                let v = (u32::from(oct[0] - b'0') << 6) | (u32::from(oct[1] - b'0') << 3) | u32::from(oct[2] - b'0');
-                if let Ok(byte) = u8::try_from(v) {
-                    out.push(byte);
-                    i += 4;
-                    continue;
-                }
+        if b[i] == b'\\'
+            && let Some(oct) = b.get(i + 1..i + 4).filter(|o| o.iter().all(|c| (b'0'..=b'7').contains(c)))
+        {
+            let v = (u32::from(oct[0] - b'0') << 6) | (u32::from(oct[1] - b'0') << 3) | u32::from(oct[2] - b'0');
+            if let Ok(byte) = u8::try_from(v) {
+                out.push(byte);
+                i += 4;
+                continue;
             }
         }
         out.push(b[i]);
@@ -64,12 +64,13 @@ fn unescape_hex(s: &str) -> String {
     let b = s.as_bytes();
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'\\' && b.get(i + 1) == Some(&b'x') {
-            if let Some(v) = s.get(i + 2..i + 4).and_then(|h| u8::from_str_radix(h, 16).ok()) {
-                out.push(v);
-                i += 4;
-                continue;
-            }
+        if b[i] == b'\\'
+            && b.get(i + 1) == Some(&b'x')
+            && let Some(v) = s.get(i + 2..i + 4).and_then(|h| u8::from_str_radix(h, 16).ok())
+        {
+            out.push(v);
+            i += 4;
+            continue;
         }
         out.push(b[i]);
         i += 1;

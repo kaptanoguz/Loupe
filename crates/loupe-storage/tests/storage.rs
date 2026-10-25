@@ -131,7 +131,7 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
 fn write_jpeg(path: &Path, seed: u32) {
     let img = DynamicImage::ImageRgb8(ImageBuffer::from_fn(320, 240, |x, y| {
         let v = ((x * seed + y * 3) % 256) as u8;
-        let w = if (x / 40 + y / (30 + seed)) % 2 == 0 { 220 } else { 30 };
+        let w = if (x / 40 + y / (30 + seed)).is_multiple_of(2) { 220 } else { 30 };
         Rgb([v, w, ((x + y + seed) % 256) as u8])
     }));
     let mut bytes = Vec::new();

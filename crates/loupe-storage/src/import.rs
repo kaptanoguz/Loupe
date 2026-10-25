@@ -391,10 +391,10 @@ impl Importer {
     fn undo_placement(target: &Path, move_back_to: Option<&Path>) {
         match move_back_to {
             Some(src) => {
-                if rename_noreplace(target, src).is_ok() {
-                    if let Some(p) = src.parent() {
-                        let _ignored = fsync_dir(p);
-                    }
+                if rename_noreplace(target, src).is_ok()
+                    && let Some(p) = src.parent()
+                {
+                    let _ignored = fsync_dir(p);
                 }
             }
             None => {
