@@ -43,6 +43,7 @@
 
   import type { FaceRef, PeopleDto } from "../api/types";
   import { count } from "../format";
+  import { t } from "../i18n";
   import type { Catalog } from "../state/catalog.svelte";
   import FaceThumb from "./FaceThumb.svelte";
 
@@ -105,8 +106,8 @@
     const view =
       c.personId !== null ? { kind: "person" as const, id: c.personId } : { kind: "cluster" as const, id: c.clusterId ?? 0 };
     void catalog.open(view, catalog.grouping, {
-      title: c.name ?? "İsimsiz kişi",
-      subtitle: `${count(c.photoCount)} fotoğraf`,
+      title: c.name ?? t("people.unnamedPerson"),
+      subtitle: t("status.photos", { n: count(c.photoCount) }),
     });
   }
 
@@ -137,7 +138,7 @@
           : await catalog.backend.nameCluster(c.clusterId ?? 0, n);
       focus = `p${id}`;
       selected = [focus];
-    }, `Adlandırıldı: ${n}`);
+    }, t("people.named", { name: n }));
   }
 
   function merge(): void {
@@ -154,20 +155,20 @@
         focus = `p${p.into}`;
       }
       selected = focus ? [focus] : [];
-    }, "Birleştirildi");
+    }, t("people.merged"));
   }
 
   function ignore(c: PersonCard): void {
     if (c.clusterId === null) return;
-    void act(() => catalog.backend.ignoreCluster(c.clusterId ?? 0, true), "Küme yoksayıldı");
+    void act(() => catalog.backend.ignoreCluster(c.clusterId ?? 0, true), t("people.ignored"));
   }
 
   function detach(id: number): void {
-    void act(() => catalog.backend.detachFace(id), "Yüz ayrıldı");
+    void act(() => catalog.backend.detachFace(id), t("people.detached"));
   }
 
   function reject(id: number): void {
-    void act(() => catalog.backend.rejectFace(id), "Yüz değil olarak işaretlendi");
+    void act(() => catalog.backend.rejectFace(id), t("people.rejected"));
   }
 
   function move(id: number, target: string): void {
@@ -178,7 +179,7 @@
         c.personId !== null
           ? catalog.backend.assignFace(id, c.personId)
           : catalog.backend.moveFace(id, c.clusterId ?? 0),
-      `Yüz taşındı: ${c.name ?? "isimsiz küme"}`,
+      t("people.moved", { name: c.name ?? t("people.unnamedCluster") }),
     );
   }
 
@@ -201,36 +202,36 @@
       class:selected={selected.includes(key)}
       onclick={(e) => pick(c, e)}
       ondblclick={() => openPhotos(c)}
-      title="Tıkla: seç · Ctrl+tıkla: çoklu seçim · Çift tıkla: fotoğraflar"
+      title={t("people.cardTitle")}
     >
       <FaceThumb {catalog} face={c.cover} width={104} height={128} />
-      <span class="truncate text-sm {c.name ? 'text-ink' : 'text-ink-3'}">{c.name ?? "İsimsiz"}</span>
-      <span class="data text-2xs text-ink-3">{count(c.photoCount)} fotoğraf</span>
+      <span class="truncate text-sm {c.name ? 'text-ink' : 'text-ink-3'}">{c.name ?? t("people.unnamed")}</span>
+      <span class="data text-2xs text-ink-3">{t("status.photos", { n: count(c.photoCount) })}</span>
     </button>
   </li>
 {/snippet}
 
-<section class="flex h-full min-w-0 flex-1" aria-label="Kişiler">
+<section class="flex h-full min-w-0 flex-1" aria-label={t("view.people")}>
   <div class="flex min-w-0 flex-1 flex-col">
     <header class="flex h-toolbar shrink-0 items-center gap-3 border-b border-line px-4">
-      <h1 class="text-sm font-medium text-ink">Kişiler</h1>
+      <h1 class="text-sm font-medium text-ink">{t("view.people")}</h1>
       <span class="data text-2xs text-ink-3">
-        {count(people?.named.length ?? 0)} kişi · {count(people?.unnamed.length ?? 0)} isimsiz{people?.ignored
-          ? ` · ${count(people.ignored)} yoksayıldı`
+        {t("people.summary", { named: count(people?.named.length ?? 0), unnamed: count(people?.unnamed.length ?? 0) })}{people?.ignored
+          ? t("people.ignoredCount", { n: count(people.ignored) })
           : ""}
       </span>
       {#if ai && ai.mode !== "off" && ai.pending.faces + ai.pending.clustering > 0}
         <span class="data text-2xs text-amber">
-          {ai.paused ? "duraklatıldı" : "taranıyor"} · {count(ai.pending.faces)} fotoğraf kaldı
+          {ai.paused ? t("people.paused") : t("sidebar.scanning")} · {t("people.left", { n: count(ai.pending.faces) })}
         </span>
       {/if}
       <span class="flex-1"></span>
       {#if plan}
-        <span class="data text-2xs text-ink-2">{selected.length} seçili</span>
+        <span class="data text-2xs text-ink-2">{t("people.selected", { n: selected.length })}</span>
         <button class="btn" onclick={merge} disabled={working}>
-          <Merge size={14} strokeWidth={1.5} />Birleştir
+          <Merge size={14} strokeWidth={1.5} />{t("people.merge")}
         </button>
-        <button class="btn btn-ghost" onclick={() => (selected = focus ? [focus] : [])} aria-label="Seçimi temizle">
+        <button class="btn btn-ghost" onclick={() => (selected = focus ? [focus] : [])} aria-label={t("people.clear")}>
           <X size={14} strokeWidth={1.5} />
         </button>
       {/if}
@@ -239,20 +240,20 @@
     <div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
       {#if ai?.mode === "off"}
         <p class="mb-3 border border-line px-3 py-2 text-xs text-ink-2">
-          Yüz tanıma kapalı{ai.reason ? `: ${ai.reason}` : ""}. Modeller kurulunca tarama kendiliğinden başlar.
+          {t("people.off", { reason: ai.reason ? `: ${ai.reason}` : "" })}
         </p>
       {/if}
       {#if people && all.length === 0}
-        <p class="label pt-6">Henüz yüz bulunmadı</p>
+        <p class="label pt-6">{t("people.none")}</p>
       {/if}
       {#if people && people.named.length > 0}
-        <h2 class="label pb-2">Adlandırılmış</h2>
+        <h2 class="label pb-2">{t("people.namedHeading")}</h2>
         <ul class="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-2 pb-4">
           {#each people.named as c (cardKey(c))}{@render card(c)}{/each}
         </ul>
       {/if}
       {#if people && people.unnamed.length > 0}
-        <h2 class="label pb-2">İsimsiz</h2>
+        <h2 class="label pb-2">{t("people.unnamed")}</h2>
         <ul class="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-2">
           {#each people.unnamed as c (cardKey(c))}{@render card(c)}{/each}
         </ul>
@@ -262,7 +263,7 @@
 
   {#if focused}
     {@const c = focused}
-    <aside class="flex w-inspector shrink-0 flex-col border-l border-line bg-surface" aria-label="Kişi ayrıntısı">
+    <aside class="flex w-inspector shrink-0 flex-col border-l border-line bg-surface" aria-label={t("people.detail")}>
       <div class="flex gap-3 border-b border-line p-3">
         <FaceThumb {catalog} face={c.cover} width={72} height={88} />
         <div class="flex min-w-0 flex-1 flex-col gap-2">
@@ -271,22 +272,22 @@
             bind:value={name}
             {onkeydown}
             onblur={saveName}
-            placeholder="Ad ver"
-            aria-label="Kişinin adı"
+            placeholder={t("people.namePlaceholder")}
+            aria-label={t("people.nameLabel")}
           />
-          <span class="data text-2xs text-ink-3">{count(c.faceCount)} yüz · {count(c.photoCount)} fotoğraf</span>
+          <span class="data text-2xs text-ink-3">{t("people.faces", { n: count(c.faceCount) })} · {t("status.photos", { n: count(c.photoCount) })}</span>
         </div>
       </div>
       <div class="flex gap-2 border-b border-line p-3">
-        <button class="btn flex-1 justify-center" onclick={() => openPhotos(c)}>Fotoğrafları aç</button>
+        <button class="btn flex-1 justify-center" onclick={() => openPhotos(c)}>{t("people.openPhotos")}</button>
         {#if c.personId === null}
-          <button class="btn" onclick={() => ignore(c)} title="Bu kümeyi gizle" aria-label="Yoksay">
+          <button class="btn" onclick={() => ignore(c)} title={t("people.hideCluster")} aria-label={t("people.ignore")}>
             <EyeOff size={14} strokeWidth={1.5} />
           </button>
         {/if}
       </div>
 
-      <h2 class="label px-3 pt-3 pb-2">Yüzler</h2>
+      <h2 class="label px-3 pt-3 pb-2">{t("people.facesHeading")}</h2>
       <ul class="grid min-h-0 flex-1 auto-rows-min grid-cols-3 gap-1 overflow-y-auto px-3 pb-3">
         {#each faces as f (f.faceId)}
           <li>
@@ -294,7 +295,7 @@
               class="block"
               class:selected={face === f.faceId}
               onclick={() => (face = face === f.faceId ? null : f.faceId)}
-              aria-label="Yüz {f.faceId}"
+              aria-label={t("people.face", { id: f.faceId })}
               aria-pressed={face === f.faceId}
             >
               <FaceThumb {catalog} face={f} width={80} height={96} size="md" />
@@ -305,25 +306,25 @@
 
       {#if face !== null}
         {@const id = face}
-        <div class="flex flex-col gap-2 border-t border-line p-3" aria-label="Yüz işlemleri">
+        <div class="flex flex-col gap-2 border-t border-line p-3" aria-label={t("people.faceActions")}>
           <select
             class="input w-full"
-            aria-label="Yüzü taşı"
+            aria-label={t("people.moveFace")}
             onchange={(e) => {
               const v = (e.currentTarget as HTMLSelectElement).value;
               if (v) move(id, v);
             }}
           >
-            <option value="">Başka kişiye taşı…</option>
+            <option value="">{t("people.moveTo")}</option>
             {#each all.filter((x) => cardKey(x) !== focus) as x (cardKey(x))}
-              <option value={cardKey(x)}>{x.name ?? `İsimsiz küme ${x.clusterId}`} · {x.faceCount}</option>
+              <option value={cardKey(x)}>{x.name ?? t("people.clusterN", { id: x.clusterId ?? 0 })} · {x.faceCount}</option>
             {/each}
           </select>
           <div class="flex gap-2">
             <button class="btn flex-1 justify-center" onclick={() => detach(id)} disabled={working}>
-              <Unlink size={14} strokeWidth={1.5} />Ayır
+              <Unlink size={14} strokeWidth={1.5} />{t("people.detach")}
             </button>
-            <button class="btn flex-1 justify-center" onclick={() => reject(id)} disabled={working}>Yüz değil</button>
+            <button class="btn flex-1 justify-center" onclick={() => reject(id)} disabled={working}>{t("people.notFace")}</button>
           </div>
         </div>
       {/if}

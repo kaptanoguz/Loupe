@@ -2,9 +2,10 @@
   import Heart from "@lucide/svelte/icons/heart";
 
   import type { ColorLabel, SyncState } from "../api/types";
-  import { LABEL_BG } from "../design/labels";
+  import { LABEL_BG, LABEL_NAME } from "../design/labels";
   import { THUMB_RETRIES, THUMB_RETRY_MS } from "../design/layout";
   import { clock } from "../format";
+  import { t } from "../i18n";
 
   interface Props {
     idx: number;
@@ -67,8 +68,8 @@
   {#if ready}
     {#if rating > 0 || favorite}
       <span class="data scrim absolute top-1 left-1 flex h-4 items-center gap-1 px-1 text-2xs text-ink">
-        {#if favorite}<Heart size={10} strokeWidth={1.5} class="fill-ink" aria-label="favori" />{/if}
-        {#if rating > 0}<span aria-label="{rating} yıldız">{compact ? `★${rating}` : "★".repeat(rating)}</span>{/if}
+        {#if favorite}<Heart size={10} strokeWidth={1.5} class="fill-ink" aria-label={t("tile.favorite")} />{/if}
+        {#if rating > 0}<span aria-label={t("tile.stars", { n: rating })}>{compact ? `★${rating}` : "★".repeat(rating)}</span>{/if}
       </span>
     {/if}
     {#if (raw || video) && !compact}
@@ -77,7 +78,7 @@
       </span>
     {/if}
     {#if label}
-      <span class="label-dot {LABEL_BG[label]}" aria-label="etiket {label}"></span>
+      <span class="label-dot {LABEL_BG[label]}" aria-label={t("tile.label", { label: LABEL_NAME[label] })}></span>
     {/if}
     <span class="sync-dot" data-sync={sync}></span>
   {/if}

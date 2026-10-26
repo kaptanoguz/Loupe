@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
 
   import { count } from "../format";
+  import { t } from "../i18n";
   import type { Catalog } from "../state/catalog.svelte";
 
   interface Props {
@@ -42,20 +43,19 @@
   <div
     class="flex w-[420px] max-w-[calc(100vw-32px)] flex-col gap-3 rounded-sm border border-line bg-surface p-4"
     role="alertdialog"
-    aria-label="Diskten sil"
+    aria-label={t("trash.label")}
     aria-modal="true"
   >
     <h1 class="flex items-center gap-2 text-sm font-medium text-ink">
-      <Trash size={14} strokeWidth={1.5} />{count(ids.length)} fotoğraf diskten silinsin mi?
+      <Trash size={14} strokeWidth={1.5} />{t("trash.title", { n: count(ids.length) })}
     </h1>
     <p class="text-sm text-ink-2">
-      Dosyalar Çöp Kutusu'na taşınır ve Loupe'den çıkar. Fikrinizi değiştirirseniz dosya yöneticisinin Çöp Kutusu'ndan
-      geri alabilirsiniz; Loupe açıkken geri gelen dosya kendiliğinden yeniden kataloglanır.
+      {t("trash.body")}
     </p>
     <div class="flex justify-end gap-2">
-      <button class="btn" bind:this={cancelButton} disabled={busy} onclick={close}>Vazgeç</button>
+      <button class="btn" bind:this={cancelButton} disabled={busy} onclick={close}>{t("common.cancel")}</button>
       <button class="btn btn-primary" disabled={busy} onclick={confirm}>
-        {busy ? "Taşınıyor…" : "Çöp Kutusu'na taşı"}
+        {busy ? t("trash.moving") : t("trash.confirm")}
       </button>
     </div>
   </div>

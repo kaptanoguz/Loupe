@@ -4,6 +4,7 @@
 
   import type { ImportMode, LibraryDto, LibraryPatch } from "../../api/types";
   import { bytes, count } from "../../format";
+  import { t } from "../../i18n";
   import { DATE_PATTERNS, joinLayout, layoutError, previewPath, splitLayout } from "../../importLayout";
   import type { Catalog } from "../../state/catalog.svelte";
 
@@ -14,15 +15,15 @@
   let { catalog }: Props = $props();
 
   const MODES: { key: ImportMode; name: string }[] = [
-    { key: "copy", name: "Kopyala" },
-    { key: "move", name: "Taşı" },
-    { key: "hardlink", name: "Bağla" },
+    { key: "copy", name: t("import.copy") },
+    { key: "move", name: t("import.move") },
+    { key: "hardlink", name: t("import.link") },
   ];
   const STATE: Record<LibraryDto["state"], string> = {
-    online: "bağlı",
-    offline: "bağlı değil",
-    readonly: "salt okunur",
-    error: "hata",
+    online: t("lib.online"),
+    offline: t("sidebar.notMounted"),
+    readonly: t("lib.readonly"),
+    error: t("sync.error"),
   };
 
   const libs = $derived(catalog.sidebar?.libraries ?? []);
@@ -56,14 +57,14 @@
   async function saveName(l: LibraryDto): Promise<void> {
     const name = names[l.id]?.trim();
     if (!name || name === l.name) return;
-    await update(l, { name }, `Ad değişti: ${name}`);
+    await update(l, { name }, t("lib.renamed", { name }));
     delete names[l.id];
   }
 
   async function saveLayout(l: LibraryDto): Promise<void> {
     const { sub, date } = layoutOf(l);
     const layoutTemplate = joinLayout(sub, date);
-    await update(l, { layoutTemplate }, `${l.name}: yeni aktarımlar ${layoutTemplate} düzeniyle`);
+    await update(l, { layoutTemplate }, t("lib.layoutSaved", { name: l.name, layout: layoutTemplate }));
     delete layouts[l.id];
   }
 
@@ -74,7 +75,7 @@
       if (catalog.view.kind === "library" && catalog.view.id === l.id) void catalog.open({ kind: "all" });
       else void catalog.open(catalog.view);
       await catalog.refreshSidebar();
-      catalog.flash(`${l.name} kaldırıldı · ${count(n)} kayıt (dosyalar diskte duruyor)`);
+      catalog.flash(t("lib.removed", { name: l.name, n: count(n) }));
     } catch (e) {
       catalog.fail(e);
     } finally {
@@ -86,14 +87,12 @@
 
 <div class="flex flex-col gap-6 p-4">
   <section class="flex flex-col gap-2">
-    <h2 class="label">Kütüphaneler</h2>
+    <h2 class="label">{t("settings.libraries")}</h2>
     <p class="text-xs text-ink-3">
-      <b class="text-ink-2">Yönetilen</b> kütüphaneye içe aktarılan fotoğraflar kopyalanır ya da taşınır;
-      <b class="text-ink-2">birincil</b> olan içe aktarma penceresinde önce seçili gelir. Yeni klasörü kenar çubuğundaki
-      "Klasör" düğmesiyle ekleyin.
+      {@html t("lib.intro")}
     </p>
     {#if libs.length === 0}
-      <p class="text-sm text-ink-2">Henüz klasör yok.</p>
+      <p class="text-sm text-ink-2">{t("lib.none")}</p>
     {/if}
     {#each libs as l (l.id)}
       {@const lay = layoutOf(l)}
@@ -104,40 +103,40 @@
         <div class="flex items-center gap-2">
           <input
             class="input h-6 min-w-0 flex-1 text-sm"
-            aria-label="Kütüphane adı"
+            aria-label={t("lib.nameLabel")}
             value={names[l.id] ?? l.name}
             oninput={(e) => (names[l.id] = (e.currentTarget as HTMLInputElement).value)}
             onblur={() => saveName(l)}
             onkeydown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()}
           />
           {#if l.primary}
-            <span class="border border-amber px-1 text-2xs text-amber">birincil</span>
+            <span class="border border-amber px-1 text-2xs text-amber">{t("import.primary")}</span>
           {:else if l.managed}
-            <button class="btn h-6" disabled={busy || l.state !== "online"} onclick={() => update(l, { primary: true }, `${l.name} birincil kütüphane`)}
-              >Birincil yap</button
+            <button class="btn h-6" disabled={busy || l.state !== "online"} onclick={() => update(l, { primary: true }, t("lib.nowPrimary", { name: l.name }))}
+              >{t("lib.makePrimary")}</button
             >
           {/if}
-          <span class="text-2xs text-ink-3">{l.managed ? "yönetilen" : "referans (yalnızca dizinlenir)"}</span>
+          <span class="text-2xs text-ink-3">{l.managed ? t("lib.managed") : t("lib.reference")}</span>
         </div>
         <dl class="kv data text-2xs">
-          <dt>Klasör</dt>
+          <dt>{t("sidebar.folder")}</dt>
           <dd class="break-all">{l.root ?? "—"}</dd>
-          <dt>Durum</dt>
+          <dt>{t("status.label")}</dt>
           <dd class={l.state === "online" ? "" : "text-amber"}>{STATE[l.state]}{l.stateReason ? ` · ${l.stateReason}` : ""}</dd>
-          <dt>Fotoğraf</dt>
+          <dt>{t("lib.photos")}</dt>
           <dd>{count(l.mediaCount)}</dd>
-          <dt>Disk</dt>
-          <dd>{l.fsType ?? "?"}{l.freeBytes !== null ? ` · ${bytes(l.freeBytes)} boş` : ""}</dd>
+          <dt>{t("lib.disk")}</dt>
+          <dd>{l.fsType ?? "?"}{l.freeBytes !== null ? ` · ${t("sidebar.free", { size: bytes(l.freeBytes) })}` : ""}</dd>
         </dl>
 
         {#if l.managed}
           <div class="flex flex-col gap-1">
-            <span class="label">İçe aktarma klasör düzeni (varsayılan)</span>
+            <span class="label">{t("lib.layout")}</span>
             <div class="flex gap-1">
               <input
                 class="input h-6 w-36 text-xs"
-                aria-label="Alt klasör"
-                placeholder="alt klasör (boş)"
+                aria-label={t("lib.sub")}
+                placeholder={t("lib.subPlaceholder")}
                 value={lay.sub}
                 oninput={(e) => setLayout(l, { sub: (e.currentTarget as HTMLInputElement).value })}
               />
@@ -156,22 +155,22 @@
             {/if}
             {#if dirty}
               <div class="flex justify-end gap-2">
-                <button class="btn h-6" onclick={() => delete layouts[l.id]}>Vazgeç</button>
+                <button class="btn h-6" onclick={() => delete layouts[l.id]}>{t("common.cancel")}</button>
                 <button class="btn btn-primary h-6" disabled={busy || !!problem} onclick={() => saveLayout(l)}
-                  ><Save size={12} strokeWidth={1.5} />Kaydet</button
+                  ><Save size={12} strokeWidth={1.5} />{t("common.save")}</button
                 >
               </div>
             {/if}
           </div>
 
           <div class="flex items-center gap-2">
-            <span class="label w-36">Varsayılan mod</span>
+            <span class="label w-36">{t("lib.defaultMode")}</span>
             {#each MODES as m (m.key)}
               <button
                 class="btn h-6 flex-1 text-xs {l.defaultImportMode === m.key ? 'border-amber text-ink' : 'text-ink-2'}"
                 aria-pressed={l.defaultImportMode === m.key}
                 disabled={busy}
-                onclick={() => update(l, { defaultImportMode: m.key }, `${l.name}: varsayılan mod ${m.name}`)}
+                onclick={() => update(l, { defaultImportMode: m.key }, t("lib.modeSaved", { name: l.name, mode: m.name }))}
                 >{m.name}</button
               >
             {/each}
@@ -181,13 +180,13 @@
         <div class="flex items-center justify-end gap-2 border-t border-line pt-2">
           {#if confirming === l.id}
             <span class="flex-1 text-xs text-ink-2"
-              >{count(l.mediaCount)} kayıt Loupe'den çıkar. Diskteki dosyalara dokunulmaz.</span
+              >{t("sidebar.removeBody", { n: count(l.mediaCount) })}</span
             >
-            <button class="btn h-6" onclick={() => (confirming = null)}>Vazgeç</button>
-            <button class="btn h-6 border-amber text-amber" disabled={busy} onclick={() => remove(l)}>Kaldır</button>
+            <button class="btn h-6" onclick={() => (confirming = null)}>{t("common.cancel")}</button>
+            <button class="btn h-6 border-amber text-amber" disabled={busy} onclick={() => remove(l)}>{t("common.remove")}</button>
           {:else}
             <button class="btn btn-ghost h-6 text-ink-3" onclick={() => (confirming = l.id)}
-              ><FolderMinus size={12} strokeWidth={1.5} />Loupe'den kaldır</button
+              ><FolderMinus size={12} strokeWidth={1.5} />{t("lib.removeFromLoupe")}</button
             >
           {/if}
         </div>
@@ -196,12 +195,9 @@
   </section>
 
   <section class="flex flex-col gap-2">
-    <h2 class="label">Silme ve Çöp Kutusu</h2>
+    <h2 class="label">{t("lib.trashTitle")}</h2>
     <p class="text-xs text-ink-2">
-      Seçili fotoğraflar (Ctrl ya da Shift ile seçip Delete) onaydan sonra sistemin Çöp Kutusu'na taşınır, sidecar
-      dosyalarıyla birlikte. Çöp Kutusu kurulamayan disklerde (ör. kullanıcıya bağlanmamış NTFS) aynı diskteki
-      <span class="data">&lt;kütüphane&gt;/.loupe/trash/&lt;tarih&gt;/</span> klasörüne taşınır. Geri almak için dosyayı
-      eski yerine taşıyın; Loupe açıkken klasör izleyicisi onu yeniden kataloglar.
+      {@html t("lib.trashHint")}
     </p>
   </section>
 </div>

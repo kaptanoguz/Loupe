@@ -51,6 +51,7 @@
   import { onDestroy, untrack } from "svelte";
 
   import { count } from "../format";
+  import { coreText, t } from "../i18n";
   import type { JustifiedLayout } from "../layout/justified";
   import type { LayoutEngine } from "../layout/engine";
   import { ScrollSpeed, revealTop, thumbClass, visibleRange } from "../layout/virtual";
@@ -259,17 +260,17 @@
   class="relative h-full min-w-0 flex-1 overflow-y-auto bg-canvas"
   onscroll={schedule}
   role="grid"
-  aria-label="Zaman çizelgesi"
+  aria-label={t("grid.label")}
   aria-rowcount={layout?.rowTops.length ?? 0}
   tabindex="0"
 >
   {#if catalog.opened && catalog.total === 0 && !catalog.error}
     <div class="flex h-full flex-col items-start justify-center gap-3 px-8">
-      <p class="label">Bu görünüm boş</p>
+      <p class="label">{t("grid.empty")}</p>
       <p class="max-w-96 text-sm text-ink-2">
-        Fotoğraf klasörü ekleyin veya bir kartı içe aktarın. Dosyalar taşınmadan da (referans) kataloglanabilir.
+        {t("grid.emptyHint")}
       </p>
-      {#if onAddFolder}<button class="btn" onclick={onAddFolder}>Klasör ekle</button>{/if}
+      {#if onAddFolder}<button class="btn" onclick={onAddFolder}>{t("grid.addFolder")}</button>{/if}
     </div>
   {:else if layout}
     <!-- svelte-ignore a11y_click_events_have_key_events (klavye: App.svelte genel kısayolları) -->
@@ -283,8 +284,8 @@
             style:width="{layout.width}px"
           >
             <span class="flex items-baseline gap-2">
-              <span class="text-sm font-medium text-ink">{sec.title}</span>
-              {#if sec.subtitle}<span class="text-xs text-ink-3">{sec.subtitle}</span>{/if}
+              <span class="text-sm font-medium text-ink">{coreText(sec.title)}</span>
+              {#if sec.subtitle}<span class="text-xs text-ink-3">{coreText(sec.subtitle)}</span>{/if}
             </span>
             <span class="data text-2xs text-ink-3">{count(sec.count)}</span>
           </div>

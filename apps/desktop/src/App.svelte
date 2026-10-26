@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "./lib/i18n";
   import { onDestroy, onMount } from "svelte";
 
   import { type Backend, createBackend } from "./lib/api/backend";
@@ -97,7 +98,7 @@
   function importTarget(): number | null {
     const libs = catalog.sidebar?.libraries ?? [];
     const target = libs.find((l) => l.primary && l.managed && l.state === "online") ?? libs.find((l) => l.managed && l.state === "online");
-    if (!target) catalog.error = "Önce yönetilen bir kütüphane klasörü ekleyin (bağlı diskte).";
+    if (!target) catalog.error = t("app.needLibrary");
     return target?.id ?? null;
   }
 
@@ -121,7 +122,7 @@
       const s = await backend.startImport(req);
       track(s);
       const lib = catalog.sidebar?.libraries.find((l) => l.id === req.libraryId);
-      catalog.flash(`İçe aktarma başladı → ${lib?.name ?? "kütüphane"}${req.layout ? ` / ${req.layout}` : ""}`);
+      catalog.flash(t("app.importStarted", { name: `${lib?.name ?? t("app.library")}${req.layout ? ` / ${req.layout}` : ""}` }));
     } catch (e) {
       fail(e);
     }
@@ -134,9 +135,9 @@
       catalog.clearMarks();
       void catalog.open(catalog.view);
       void catalog.refreshSidebar();
-      const local = r.loupeTrash > 0 ? ` (${r.loupeTrash} tanesi bu diskte Çöp Kutusu olmadığından ${r.loupeTrashDir} klasörüne)` : "";
-      if (r.failed.length > 0) catalog.error = `${r.trashed} fotoğraf taşındı · ${r.failed.length} taşınamadı: ${r.failed[0]?.reason}`;
-      else catalog.flash(`${r.trashed} fotoğraf Çöp Kutusu'na taşındı${local}`);
+      const local = r.loupeTrash > 0 ? t("app.trashLocal", { n: r.loupeTrash, dir: r.loupeTrashDir ?? "" }) : "";
+      if (r.failed.length > 0) catalog.error = t("app.trashPartial", { n: r.trashed, failed: r.failed.length, reason: r.failed[0]?.reason ?? "" });
+      else catalog.flash(t("app.trashed", { n: r.trashed }) + local);
     } catch (e) {
       fail(e);
     }
@@ -149,7 +150,7 @@
       if (catalog.view.kind === "library" && catalog.view.id === id) void catalog.open({ kind: "all" });
       else void catalog.open(catalog.view);
       await catalog.refreshSidebar();
-      catalog.flash(`Klasör kaldırıldı · ${removed} kayıt (dosyalar diskte duruyor)`);
+      catalog.flash(t("app.folderRemoved", { n: removed }));
     } catch (e) {
       fail(e);
     }
@@ -164,7 +165,7 @@
     try {
       const [phone] = await backend.findIphone();
       if (!phone) {
-        catalog.error = "iPhone bulunamadı: kabloyla bağlayın, kilidini açın ve \"Bu bilgisayara güven\" deyin.";
+        catalog.error = t("app.iphoneMissing");
         return;
       }
       importSource = { kind: "iphone", path: phone.dcim };
@@ -177,19 +178,19 @@
   }
 
   const commands = $derived.by((): PaletteCommand[] => [
-    { id: "verify", label: "Kütüphaneyi Doğrula (Bit-Rot)", hint: "BLAKE3 ile tüm dosyaları denetle" },
-    { id: "wifi", label: "Wi-Fi Telefon Eşleştir", hint: "QR kodu göster, cihazları yönet" },
-    { id: "iphone", label: "iPhone'dan İçe Aktar", hint: "kabloyla bağlı iPhone'un fotoğraflarını kopyala" },
-    { id: "cloud", label: "Bulut Senkronizasyonunu Başlat", hint: "şifreli yedeklemeyi şimdi çalıştır" },
+    { id: "verify", label: t("cmd.verify"), hint: t("cmd.verifyHint") },
+    { id: "wifi", label: t("cmd.wifi"), hint: t("cmd.wifiHint") },
+    { id: "iphone", label: t("cmd.iphone"), hint: t("cmd.iphoneHint") },
+    { id: "cloud", label: t("cmd.cloud"), hint: t("cmd.cloudHint") },
     {
       id: "ai-pause",
-      label: catalog.status?.ai.paused ? "Yapay Zekâyı Sürdür" : "Yapay Zekâyı Duraklat",
-      hint: "yüz ve CLIP analizi",
+      label: catalog.status?.ai.paused ? t("cmd.aiResume") : t("cmd.aiPause"),
+      hint: t("cmd.aiHint"),
     },
-    { id: "slideshow", label: "Slayt Gösterisi", hint: "seçili fotoğraftan ya da işaretlilerle, tam ekran (S)" },
-    { id: "people", label: "Kişiler", hint: "yüzleri adlandır, birleştir" },
-    { id: "events", label: "Etkinlikler", hint: "ad ver, kilitle" },
-    { id: "settings", label: "Ayarlar", hint: "kütüphaneler, telefon, bulut, doğrulama, yapay zekâ" },
+    { id: "slideshow", label: t("cmd.slideshow"), hint: t("cmd.slideshowHint") },
+    { id: "people", label: t("cmd.people"), hint: t("cmd.peopleHint") },
+    { id: "events", label: t("cmd.events"), hint: t("cmd.eventsHint") },
+    { id: "settings", label: t("cmd.settings"), hint: t("cmd.settingsHint") },
   ]);
 
   async function runCommand(id: CommandId): Promise<void> {
@@ -198,7 +199,7 @@
         case "verify": {
           const started = await backend.verifyLibrary();
           catalog.flash(
-            started.length ? `Doğrulama başladı · ${started.length} kütüphane` : "Doğrulanacak çevrimiçi kütüphane yok",
+            started.length ? t("app.verifyStarted", { n: started.length }) : t("app.verifyNone"),
           );
           catalog.openSettings("verify");
           break;
@@ -216,16 +217,16 @@
           else if (setup.length > 0) catalog.openSettings("encryption");
           catalog.flash(
             st.length === 0
-              ? "Bulut hedefi yok: önce bir hedef ekleyin"
+              ? t("app.cloudNoTarget")
               : setup.length > 0
-                ? "Şifreli hedef için önce kurtarma anahtarı oluşturun"
-                : `Bulut senkronizasyonu başladı · ${st.reduce((n, t) => n + t.pending, 0)} dosya sırada`,
+                ? t("app.cloudNeedsKey")
+                : t("app.cloudStarted", { n: st.reduce((n, x) => n + x.pending, 0) }),
           );
           break;
         }
         case "ai-pause": {
           const ai = await backend.setPaused(!(catalog.status?.ai.paused ?? false));
-          catalog.flash(ai.paused ? "Arka plan analizi duraklatıldı" : "Arka plan analizi sürüyor");
+          catalog.flash(ai.paused ? t("app.aiPaused") : t("app.aiRunning"));
           break;
         }
         case "slideshow":

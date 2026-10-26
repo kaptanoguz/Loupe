@@ -4,6 +4,7 @@
 
   import { THUMB_RETRIES, THUMB_RETRY_MS } from "../design/layout";
   import { count } from "../format";
+  import { t } from "../i18n";
   import type { Catalog } from "../state/catalog.svelte";
 
   interface Props {
@@ -186,9 +187,9 @@
         class="btn btn-primary absolute top-1/2 left-1/2 h-10 -translate-x-1/2 -translate-y-1/2 px-4"
         onpointerdown={(e) => e.stopPropagation()}
         onclick={play}
-        title="Sistemin video oynatıcısında aç"
+        title={t("loupe.playTitle")}
       >
-        <Play size={16} strokeWidth={1.5} />Oynat
+        <Play size={16} strokeWidth={1.5} />{t("menu.play")}
       </button>
     {/if}
   </div>
@@ -200,22 +201,22 @@
       {#if item}
         <button
           class="flex items-center gap-1 hover:text-ink {item.favorite ? 'text-ink' : ''}"
-          title="Favori (F)"
-          aria-label={item.favorite ? "Favorilerden çıkar" : "Favorilere ekle"}
+          title={t("insp.favoriteKey")}
+          aria-label={item.favorite ? t("menu.unfavorite") : t("menu.favorite")}
           aria-pressed={item.favorite}
           onclick={() => catalog.toggleFavorite([item.id])}
         >
-          <Heart size={12} strokeWidth={1.5} class={item.favorite ? "fill-ink" : ""} />{item.favorite ? "favori" : "F favori"}
+          <Heart size={12} strokeWidth={1.5} class={item.favorite ? "fill-ink" : ""} />{item.favorite ? t("tile.favorite") : t("loupe.fFavorite")}
         </button>
       {/if}
       {#if item && item.rating > 0}<span class="text-ink">{"★".repeat(item.rating)}</span>{/if}
     </span>
     <span>
-      <span class={catalog.loupeActual ? "text-amber" : ""}>{catalog.loupeActual ? "1:1" : "sığdır"}</span>
+      <span class={catalog.loupeActual ? "text-amber" : ""}>{catalog.loupeActual ? "1:1" : t("loupe.fit")}</span>
       {#if catalog.loupeActual}
-        · {full ? `${full.w}×${full.h}` : origFailed ? "önizleme (özgün açılamadı)" : "özgün yükleniyor"}
+        · {full ? `${full.w}×${full.h}` : origFailed ? t("loupe.origFailed") : t("loupe.origLoading")}
       {/if}
-      · {percent}% · Z yakınlaştır · S slayt · Esc kapat
+      · {percent}% · {t("loupe.keys")}
     </span>
   </div>
 </div>

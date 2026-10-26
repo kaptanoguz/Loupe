@@ -11,6 +11,7 @@
   import { onMount, type Component } from "svelte";
 
   import { count } from "../format";
+  import { t } from "../i18n";
   import type { Catalog } from "../state/catalog.svelte";
 
   interface Props {
@@ -39,11 +40,11 @@
     if (!item) return [];
     const it = item;
     const view: Entry[] = [];
-    if (!catalog.loupeOpen) view.push({ label: "Önizle", key: "Boşluk", icon: Maximize, run: () => {
+    if (!catalog.loupeOpen) view.push({ label: t("menu.preview"), key: t("menu.space"), icon: Maximize, run: () => {
         catalog.loupeOpen = true;
       } });
     view.push({
-      label: many ? `Seçilenlerle slayt gösterisi (${count(ids.length)})` : "Buradan slayt gösterisi",
+      label: many ? t("menu.slideshowMarked", { n: count(ids.length) }) : t("menu.slideshowHere"),
       key: "S",
       icon: Presentation,
       run: () => catalog.startSlideshow(),
@@ -52,13 +53,13 @@
       view,
       [
         {
-          label: fav ? "Favorilerden çıkar" : "Favorilere ekle",
+          label: fav ? t("menu.unfavorite") : t("menu.favorite"),
           key: "F",
           icon: Heart,
           run: () => catalog.toggleFavorite(ids),
         },
         {
-          label: "Albüme ekle…",
+          label: t("menu.addToAlbum"),
           icon: BookmarkPlus,
           run: () => {
             catalog.overlay = "album";
@@ -67,7 +68,7 @@
         ...(album
           ? [
               {
-                label: many ? `${count(ids.length)} öğeyi albümden çıkar` : "Albümden çıkar",
+                label: many ? t("menu.removeManyFromAlbum", { n: count(ids.length) }) : t("menu.removeFromAlbum"),
                 icon: Minus,
                 run: () => catalog.removeFromAlbum(ids),
               },
@@ -75,14 +76,14 @@
           : []),
       ],
       [
-        { label: "Bulunduğu klasörü aç", icon: FolderOpen, run: () => catalog.reveal(it.id) },
+        { label: t("menu.reveal"), icon: FolderOpen, run: () => catalog.reveal(it.id) },
         it.video
-          ? { label: "Oynat", icon: Play, run: () => catalog.openExternal(it.id) }
-          : { label: "Varsayılan uygulamada aç", icon: ExternalLink, run: () => catalog.openExternal(it.id) },
+          ? { label: t("menu.play"), icon: Play, run: () => catalog.openExternal(it.id) }
+          : { label: t("menu.openDefault"), icon: ExternalLink, run: () => catalog.openExternal(it.id) },
       ],
       [
         {
-          label: many ? `${count(ids.length)} öğeyi Çöp Kutusu'na taşı…` : "Çöp Kutusu'na taşı…",
+          label: many ? t("menu.trashMany", { n: count(ids.length) }) : t("menu.trash"),
           key: "Delete",
           icon: Trash,
           danger: true,
@@ -142,12 +143,12 @@
     style:left="{pos.left}px"
     style:top="{pos.top}px"
     role="menu"
-    aria-label="Fotoğraf menüsü"
+    aria-label={t("menu.label")}
     tabindex="-1"
     {onkeydown}
   >
     {#if many}
-      <p class="px-3 py-1 text-2xs text-ink-3">{count(ids.length)} öğe seçili</p>
+      <p class="px-3 py-1 text-2xs text-ink-3">{t("menu.selected", { n: count(ids.length) })}</p>
     {/if}
     {#each entries as group, g (g)}
       {#if g > 0}<div class="my-1 border-t border-line"></div>{/if}

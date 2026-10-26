@@ -7,6 +7,7 @@
   import type { InspectorDetail } from "../api/types";
   import { LABEL_BG, LABEL_NAME } from "../design/labels";
   import { bytes, dateTimeMs, resolution, shortHash } from "../format";
+  import { t } from "../i18n";
   import Histogram from "./Histogram.svelte";
 
   interface Props {
@@ -19,13 +20,13 @@
   let copied = $state(false);
 
   const SYNC_TEXT: Record<string, string> = {
-    local_only: "yalnızca yerel",
-    queued: "kuyrukta",
-    uploading: "yükleniyor",
-    synced: "yedeklendi",
-    conflict: "çakışma",
-    error: "hata",
-    remote_deleted: "uzakta silindi",
+    local_only: t("sync.local_only"),
+    queued: t("sync.queued"),
+    uploading: t("sync.uploading"),
+    synced: t("sync.synced"),
+    conflict: t("sync.conflict"),
+    error: t("sync.error"),
+    remote_deleted: t("sync.remote_deleted"),
   };
 
   const camera = $derived.by(() => {
@@ -50,7 +51,7 @@
 
 <aside
   class="flex h-full w-inspector shrink-0 flex-col overflow-y-auto border-l border-line bg-surface"
-  aria-label="Denetçi"
+  aria-label={t("insp.label")}
 >
   <Histogram histogram={detail?.histogram ?? null} />
 
@@ -58,11 +59,11 @@
     <!-- Pozlama: Swiss grid, 1px bölücüler -->
     <section class="border-b border-line">
       <div class="px-3 pt-3 pb-2">
-        <p class="truncate text-sm text-ink" title={camera ?? ""}>{camera ?? "Kamera bilinmiyor"}</p>
+        <p class="truncate text-sm text-ink" title={camera ?? ""}>{camera ?? t("insp.unknownCamera")}</p>
         <p class="truncate text-xs text-ink-2" title={detail.lensModel ?? ""}>{detail.lensModel ?? "—"}</p>
       </div>
       <dl class="grid grid-cols-2 border-t border-line">
-        {#each [["Diyafram", detail.aperture], ["Enstantane", detail.exposure], ["ISO", detail.iso?.toString() ?? null], ["Odak", detail.focalLength]] as [k, v], i (k)}
+        {#each [[t("insp.aperture"), detail.aperture], [t("insp.shutter"), detail.exposure], ["ISO", detail.iso?.toString() ?? null], [t("insp.focal"), detail.focalLength]] as [k, v], i (k)}
           <div class="px-3 py-2 {i % 2 === 1 ? 'border-l border-line' : ''} {i >= 2 ? 'border-t border-line' : ''}">
             <dt class="label">{k}</dt>
             <dd class="data mt-0.5 text-base text-ink">{v ?? "—"}</dd>
@@ -72,55 +73,55 @@
     </section>
 
     <section class="border-b border-line px-3 py-3">
-      <h3 class="label mb-2">Çekim</h3>
+      <h3 class="label mb-2">{t("insp.capture")}</h3>
       <dl class="kv gap-y-1">
-        <dt>Tarih</dt>
+        <dt>{t("insp.date")}</dt>
         <dd>{detail.takenLocal}</dd>
-        <dt>Kaynak</dt>
+        <dt>{t("insp.source")}</dt>
         <dd>{detail.takenSource}</dd>
-        <dt>Puan</dt>
-        <dd aria-label="{detail.rating} yıldız">{detail.rating > 0 ? "★".repeat(detail.rating) : "—"}</dd>
-        <dt>Etiket</dt>
+        <dt>{t("arrange.rating")}</dt>
+        <dd aria-label={t("tile.stars", { n: detail.rating })}>{detail.rating > 0 ? "★".repeat(detail.rating) : "—"}</dd>
+        <dt>{t("insp.label2")}</dt>
         <dd class="flex items-center justify-end gap-1.5">
           {#if detail.label}
             <span class="size-1.5 {LABEL_BG[detail.label]}"></span>{LABEL_NAME[detail.label]}
           {:else}—{/if}
         </dd>
-        <dt>Favori</dt>
+        <dt>{t("insp.favorite")}</dt>
         <dd class="flex justify-end">
           {#if onFavorite}
             {@const id = detail.id}
             <button
               class="flex items-center gap-1 hover:text-ink"
-              title="Favori (F)"
-              aria-label={detail.favorite ? "Favorilerden çıkar" : "Favorilere ekle"}
+              title={t("insp.favoriteKey")}
+              aria-label={detail.favorite ? t("menu.unfavorite") : t("menu.favorite")}
               aria-pressed={detail.favorite}
               onclick={() => onFavorite(id)}
             >
               <Heart size={12} strokeWidth={1.5} class={detail.favorite ? "fill-ink" : ""} />{detail.favorite
-                ? "evet"
-                : "ekle"}
+                ? t("common.yes")
+                : t("insp.add")}
             </button>
-          {:else}{detail.favorite ? "evet" : "hayır"}{/if}
+          {:else}{detail.favorite ? t("common.yes") : t("common.no")}{/if}
         </dd>
       </dl>
     </section>
 
     <section class="border-b border-line px-3 py-3">
-      <h3 class="label mb-2">Konum</h3>
+      <h3 class="label mb-2">{t("insp.location")}</h3>
       {#if detail.gps}
         <p class="data text-xs text-ink">{detail.gps.dms}</p>
         {#if detail.gps.altM !== null}
           <p class="data text-2xs text-ink-3">{detail.gps.altM.toFixed(0)} m</p>
         {/if}
-        <p class="mt-1 text-xs text-ink-2">{detail.place?.display ?? "Yer çözülmedi"}</p>
+        <p class="mt-1 text-xs text-ink-2">{detail.place?.display ?? t("insp.noPlace")}</p>
       {:else}
-        <p class="text-xs text-ink-3">Konum bilgisi yok</p>
+        <p class="text-xs text-ink-3">{t("insp.noGps")}</p>
       {/if}
     </section>
 
     <section class="border-b border-line px-3 py-3">
-      <h3 class="label mb-2">Dosya</h3>
+      <h3 class="label mb-2">{t("insp.file")}</h3>
       <p class="truncate text-xs text-ink" title={detail.fileName}>{detail.fileName}</p>
       <p class="data truncate text-2xs text-ink-3" title={detail.path ?? detail.relPath}>
         {detail.path ?? detail.relPath}
@@ -128,23 +129,23 @@
       {#if onReveal}
         {@const id = detail.id}
         <button class="btn mt-2 h-6 text-xs" onclick={() => onReveal(id)}
-          ><FolderOpen size={12} strokeWidth={1.5} />Bulunduğu klasörü aç</button
+          ><FolderOpen size={12} strokeWidth={1.5} />{t("menu.reveal")}</button
         >
       {/if}
       <dl class="kv mt-2 gap-y-1">
-        <dt>Boyut</dt>
+        <dt>{t("insp.size")}</dt>
         <dd>{bytes(detail.sizeBytes)}</dd>
-        <dt>Çözünürlük</dt>
+        <dt>{t("insp.resolution")}</dt>
         <dd>{resolution(detail.width, detail.height)}</dd>
         {#if detail.megapixels !== null}
-          <dt>Megapiksel</dt>
+          <dt>{t("insp.megapixels")}</dt>
           <dd>{detail.megapixels.toFixed(1)} MP</dd>
         {/if}
-        <dt>Tür</dt>
+        <dt>{t("insp.type")}</dt>
         <dd>{detail.rawFormat ?? detail.mime}</dd>
-        <dt>Kütüphane</dt>
-        <dd>{detail.libraryName}{detail.libraryOnline ? "" : " (çevrimdışı)"}</dd>
-        <dt>Doğrulama</dt>
+        <dt>{t("insp.library")}</dt>
+        <dd>{detail.libraryName}{detail.libraryOnline ? "" : ` (${t("sidebar.offline")})`}</dd>
+        <dt>{t("settings.verify")}</dt>
         <dd>{detail.verifyState}</dd>
         <dt>BLAKE3</dt>
         <dd class="flex items-center justify-end gap-1">
@@ -152,8 +153,8 @@
           <button
             class="btn btn-ghost h-5 px-1"
             onclick={copyHash}
-            aria-label="BLAKE3 özetini kopyala"
-            title="Tam özeti kopyala"
+            aria-label={t("insp.copyHash")}
+            title={t("insp.copyFull")}
           >
             {#if copied}<Check size={12} strokeWidth={1.5} />{:else}<Copy size={12} strokeWidth={1.5} />{/if}
           </button>
@@ -162,27 +163,27 @@
     </section>
 
     <section class="px-3 py-3">
-      <h3 class="label mb-2">Yedek</h3>
+      <h3 class="label mb-2">{t("insp.backup")}</h3>
       {#if detail.sync.length === 0}
-        <p class="text-xs text-ink-3">Bulut hedefi yok</p>
+        <p class="text-xs text-ink-3">{t("insp.noCloud")}</p>
       {:else}
         <ul class="flex flex-col gap-2">
-          {#each detail.sync as t (t.target)}
+          {#each detail.sync as s (s.target)}
             <li class="text-xs">
               <div class="flex items-center justify-between">
-                <span class="text-ink">{t.target}</span>
-                <span class="data {t.state === 'error' || t.state === 'conflict' ? 'text-amber' : 'text-ink-2'}">
-                  {SYNC_TEXT[t.state] ?? t.state}
+                <span class="text-ink">{s.target}</span>
+                <span class="data {s.state === 'error' || s.state === 'conflict' ? 'text-amber' : 'text-ink-2'}">
+                  {SYNC_TEXT[s.state] ?? s.state}
                 </span>
               </div>
               <div class="data flex items-center justify-between text-2xs text-ink-3">
-                <span>{t.provider}</span>
+                <span>{s.provider}</span>
                 <span>
-                  {t.encryption === "age" ? `age · ${t.keyFingerprint ? shortHash(t.keyFingerprint) : "anahtar ?"}` : "şifresiz"}
+                  {s.encryption === "age" ? `age · ${s.keyFingerprint ? shortHash(s.keyFingerprint) : t("insp.keyUnknown")}` : t("insp.unencrypted")}
                 </span>
               </div>
-              {#if t.uploadedAt}
-                <div class="data text-2xs text-ink-3">{dateTimeMs(t.uploadedAt)}</div>
+              {#if s.uploadedAt}
+                <div class="data text-2xs text-ink-3">{dateTimeMs(s.uploadedAt)}</div>
               {/if}
             </li>
           {/each}
@@ -190,6 +191,6 @@
       {/if}
     </section>
   {:else}
-    <p class="px-3 py-3 text-xs text-ink-3">Seçim yok</p>
+    <p class="px-3 py-3 text-xs text-ink-3">{t("insp.noSelection")}</p>
   {/if}
 </aside>

@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 /**
  * İçe aktarma klasör düzeni: isteğe bağlı alt klasör + tarih deseni.
  * `iPhone/{yyyy}/{mm}` → alt klasör `iPhone`, desen `{yyyy}/{mm}`.
@@ -5,10 +6,10 @@
  */
 
 export const DATE_PATTERNS: { value: string; label: string }[] = [
-  { value: "{yyyy}/{mm}/{dd}", label: "Yıl / Ay / Gün" },
-  { value: "{yyyy}/{mm}", label: "Yıl / Ay" },
-  { value: "{yyyy}", label: "Yıl" },
-  { value: "", label: "Tarihsiz" },
+  { value: "{yyyy}/{mm}/{dd}", label: t("layout.ymd") },
+  { value: "{yyyy}/{mm}", label: t("layout.ym") },
+  { value: "{yyyy}", label: t("arrange.year") },
+  { value: "", label: t("layout.undated") },
 ];
 
 export const DEFAULT_LAYOUT = "{yyyy}/{mm}/{dd}";
@@ -29,15 +30,15 @@ export function joinLayout(sub: string, date: string): string {
 
 /** Geçersizse nedeni, geçerliyse `null`. */
 export function layoutError(template: string): string | null {
-  const t = template.trim();
-  if (!t) return "Tarihsiz düzen için bir alt klasör adı girin.";
-  if (t.length > 200) return "Klasör yolu çok uzun.";
-  if (t.startsWith("/")) return "Yol kütüphane klasörünün içinde olmalı (/ ile başlamaz).";
-  if (t.includes("\\")) return "Klasör ayırıcı olarak / kullanın.";
-  for (const part of t.split("/")) {
-    if (!part) return "Boş klasör adı (// ) olamaz.";
-    if (part.startsWith(".")) return "Klasör adı nokta ile başlayamaz (gizli klasörler taranmaz).";
-    if (/[{}]/.test(part.replace(/\{(yyyy|mm|dd)\}/g, ""))) return "Yalnızca {yyyy}, {mm}, {dd} kullanılabilir.";
+  const tpl = template.trim();
+  if (!tpl) return t("layout.errSub");
+  if (tpl.length > 200) return t("layout.errLong");
+  if (tpl.startsWith("/")) return t("layout.errAbs");
+  if (tpl.includes("\\")) return t("layout.errBackslash");
+  for (const part of tpl.split("/")) {
+    if (!part) return t("layout.errEmpty");
+    if (part.startsWith(".")) return t("layout.errDot");
+    if (/[{}]/.test(part.replace(/\{(yyyy|mm|dd)\}/g, ""))) return t("layout.errToken");
   }
   return null;
 }

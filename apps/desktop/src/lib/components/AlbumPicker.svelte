@@ -5,6 +5,7 @@
   import { onMount } from "svelte";
 
   import { count } from "../format";
+  import { locale, t } from "../i18n";
   import type { Catalog } from "../state/catalog.svelte";
 
   interface Props {
@@ -19,13 +20,13 @@
 
   const albums = $derived(catalog.sidebar?.albums ?? []);
   const shown = $derived.by(() => {
-    const q = query.trim().toLocaleLowerCase("tr");
-    return q ? albums.filter((a) => a.name.toLocaleLowerCase("tr").includes(q)) : albums;
+    const q = query.trim().toLocaleLowerCase(locale());
+    return q ? albums.filter((a) => a.name.toLocaleLowerCase(locale()).includes(q)) : albums;
   });
   /** Yazılan ad hiçbir albümle birebir eşleşmiyorsa yeni albüm önerilir. */
   const fresh = $derived.by(() => {
     const q = query.trim();
-    return q && !albums.some((a) => a.name.toLocaleLowerCase("tr") === q.toLocaleLowerCase("tr")) ? q : null;
+    return q && !albums.some((a) => a.name.toLocaleLowerCase(locale()) === q.toLocaleLowerCase(locale())) ? q : null;
   });
 
   onMount(() => field?.focus());
@@ -60,7 +61,7 @@
   function onkeydown(e: KeyboardEvent): void {
     if (e.key !== "Enter") return;
     e.preventDefault();
-    const exact = albums.find((a) => a.name.toLocaleLowerCase("tr") === query.trim().toLocaleLowerCase("tr"));
+    const exact = albums.find((a) => a.name.toLocaleLowerCase(locale()) === query.trim().toLocaleLowerCase(locale()));
     if (exact) void pick(exact.id);
     else if (fresh) void create(fresh);
     else if (shown.length === 1 && shown[0]) void pick(shown[0].id);
@@ -75,22 +76,22 @@
   <div
     class="flex w-[420px] max-w-[calc(100vw-32px)] flex-col gap-3 rounded-sm border border-line bg-surface p-4"
     role="dialog"
-    aria-label="Albüme ekle"
+    aria-label={t("picker.label")}
     aria-modal="true"
   >
     <h1 class="flex items-center gap-2 text-sm font-medium text-ink">
-      <BookmarkPlus size={14} strokeWidth={1.5} />{count(ids.length)} öğeyi albüme ekle
+      <BookmarkPlus size={14} strokeWidth={1.5} />{t("picker.title", { n: count(ids.length) })}
     </h1>
     <input
       bind:this={field}
       bind:value={query}
       {onkeydown}
       class="input"
-      placeholder="Albüm ara ya da yeni ad yaz"
-      aria-label="Albüm adı"
+      placeholder={t("picker.placeholder")}
+      aria-label={t("sidebar.albumName")}
       disabled={busy}
     />
-    <ul class="flex max-h-72 flex-col overflow-y-auto" aria-label="Albümler">
+    <ul class="flex max-h-72 flex-col overflow-y-auto" aria-label={t("sidebar.albums")}>
       {#if fresh}
         <li>
           <button
@@ -98,7 +99,7 @@
             disabled={busy}
             onclick={() => create(fresh)}
           >
-            <Plus size={14} strokeWidth={1.5} /><span class="flex-1 truncate">Yeni albüm: {fresh}</span>
+            <Plus size={14} strokeWidth={1.5} /><span class="flex-1 truncate">{t("picker.new", { name: fresh })}</span>
           </button>
         </li>
       {/if}
@@ -114,11 +115,11 @@
           </button>
         </li>
       {:else}
-        {#if !fresh}<li class="px-2 py-1 text-xs text-ink-3">Henüz albüm yok. Bir ad yazıp Enter'a basın.</li>{/if}
+        {#if !fresh}<li class="px-2 py-1 text-xs text-ink-3">{t("picker.none")}</li>{/if}
       {/each}
     </ul>
     <div class="flex justify-end">
-      <button class="btn" disabled={busy} onclick={close}>Vazgeç</button>
+      <button class="btn" disabled={busy} onclick={close}>{t("common.cancel")}</button>
     </div>
   </div>
 </div>

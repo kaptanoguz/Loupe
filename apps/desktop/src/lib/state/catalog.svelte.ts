@@ -19,6 +19,7 @@ import type {
 import type { JustifiedLayout } from "../layout/justified";
 import { neighbor } from "../layout/virtual";
 import { type Action, cullRequestFor } from "./keymap";
+import { t } from "../i18n";
 
 /** İlk sayfa küçük (ilk ekran hızlı), sonrakiler çekirdeğin üst sınırında. */
 export const FIRST_PAGE = 600;
@@ -429,9 +430,9 @@ export class Catalog {
     try {
       const added = await this.backend.addToAlbum(id, ids);
       await this.refreshSidebar();
-      const name = this.sidebar?.albums.find((a) => a.id === id)?.name ?? "albüm";
+      const name = this.sidebar?.albums.find((a) => a.id === id)?.name ?? t("catalog.album");
       const skipped = ids.length - added;
-      this.flash(`${added} öğe "${name}" albümüne eklendi${skipped > 0 ? ` · ${skipped} tanesi zaten içindeydi` : ""}`);
+      this.flash(t("catalog.addedToAlbum", { n: added, name }) + (skipped > 0 ? t("catalog.alreadyIn", { n: skipped }) : ""));
     } catch (e) {
       this.fail(e);
     }
@@ -446,7 +447,7 @@ export class Catalog {
       this.clearMarks();
       await this.open(v);
       await this.refreshSidebar();
-      this.flash(`${n} öğe albümden çıkarıldı (dosyalar yerinde)`);
+      this.flash(t("catalog.removedFromAlbum", { n }));
     } catch (e) {
       this.fail(e);
     }
@@ -456,7 +457,7 @@ export class Catalog {
   async reveal(id: number): Promise<void> {
     try {
       const dir = await this.backend.revealMedia(id);
-      this.flash(`Klasör açıldı: ${dir}`);
+      this.flash(t("catalog.folderOpened", { dir }));
     } catch (e) {
       this.fail(e);
     }
@@ -599,7 +600,7 @@ export class Catalog {
         it.rating = r.rating;
         it.label = r.label;
         it.favorite = r.favorite;
-        if (r.sidecar === "failed") this.error = "Yan dosya (XMP) yazılamadı; değer katalogda saklandı.";
+        if (r.sidecar === "failed") this.error = t("catalog.sidecarFailed");
       }
       if (this.detail && index.has(this.detail.id)) {
         const r = results.find((x) => x.id === this.detail?.id);

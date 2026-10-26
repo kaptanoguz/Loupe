@@ -6,6 +6,7 @@
 
   import type { EncryptionDto, RecoveryDraftDto } from "../../api/types";
   import { dateTimeMs } from "../../format";
+  import { t } from "../../i18n";
   import type { Catalog } from "../../state/catalog.svelte";
 
   interface Props {
@@ -85,7 +86,7 @@
       );
       draft = null;
       step = "status";
-      catalog.flash("Kurtarma anahtarı kuruldu; şifreli yedekler başlayabilir");
+      catalog.flash(t("rk.installed"));
       void catalog.refreshStatus();
     } catch (e) {
       catalog.fail(e);
@@ -119,65 +120,64 @@
 <div class="flex flex-col gap-4 p-4">
   {#if step === "status"}
     <section class="flex flex-col gap-2">
-      <h2 class="label">age kurtarma anahtarı</h2>
+      <h2 class="label">{t("rk.title")}</h2>
       {#if enc?.configured}
         <dl class="kv gap-y-1">
-          <dt>Açık anahtar</dt>
+          <dt>{t("rk.public")}</dt>
           <dd class="truncate" title={enc.recipient ?? ""}>{enc.recipient}</dd>
-          <dt>Parmak izi</dt>
+          <dt>{t("rk.fingerprint")}</dt>
           <dd>{enc.fingerprint ?? "—"}</dd>
-          <dt>Oluşturuldu</dt>
+          <dt>{t("rk.created")}</dt>
           <dd>{dateTimeMs(enc.createdAt)}</dd>
-          <dt>Cihaz anahtarı</dt>
-          <dd>{enc.deviceKey ? "var" : "yok"}</dd>
+          <dt>{t("rk.deviceKey")}</dt>
+          <dd>{enc.deviceKey ? t("rk.present") : t("ai.missing")}</dd>
         </dl>
       {:else if enc}
         <p class="text-sm text-ink-2">
-          Şifreli bulut yedekleri için bir kurtarma anahtarı gerekir. Bu cihaz kaybolursa yedekler yalnızca bu
-          anahtarla açılır; Loupe onu bir kez gösterir, sonra yalnızca doğrulayabilir.
+          {t("rk.intro")}
         </p>
       {/if}
       <div class="flex gap-2 pt-1">
         <button class="btn {enc?.configured ? '' : 'btn-primary'}" onclick={generate} disabled={busy}>
-          {enc?.configured ? "Yeni anahtar oluştur" : "Kurtarma anahtarı oluştur"}
+          {enc?.configured ? t("rk.newKey") : t("rk.create")}
         </button>
       </div>
     </section>
 
     {#if enc?.configured}
       <section class="flex flex-col gap-2 border-t border-line pt-4">
-        <h2 class="label">Elinizdeki anahtarı doğrulayın</h2>
+        <h2 class="label">{t("rk.checkTitle")}</h2>
         <textarea
           class="input data h-16 py-1 text-xs"
           bind:value={checkInput}
           oninput={() => (checkResult = null)}
           placeholder="AGE-SECRET-KEY-1…"
-          aria-label="Kurtarma anahtarı"
+          aria-label={t("rk.key")}
           spellcheck="false"
           autocomplete="off"
         ></textarea>
         <div class="flex items-center gap-3">
           <button class="btn" onclick={check} disabled={!checkInput.trim()}>
-            <ShieldCheck size={14} strokeWidth={1.5} />Doğrula
+            <ShieldCheck size={14} strokeWidth={1.5} />{t("rk.check")}
           </button>
           {#if checkResult === true}
-            <span class="text-sm text-ink">Eşleşiyor: bu anahtar yedekleri açar.</span>
+            <span class="text-sm text-ink">{t("rk.match")}</span>
           {:else if checkResult === false}
-            <span class="text-sm text-amber">Eşleşmiyor: bu anahtar bu kütüphanenin değil.</span>
+            <span class="text-sm text-amber">{t("rk.noMatch")}</span>
           {/if}
         </div>
       </section>
     {/if}
   {:else if step === "show" && draft}
     <section class="flex flex-col gap-3">
-      <h2 class="label">Anahtarı kâğıda yazın ya da güvenli bir yere kaydedin</h2>
+      <h2 class="label">{t("rk.writeDown")}</h2>
       {#if draft.replaces}
         <p class="border border-amber px-3 py-2 text-xs text-amber">
-          Kurulu anahtarın yerine geçer. Eski yedekleri açmak için eski anahtar yine gerekir.
+          {t("rk.replaces")}
         </p>
       {/if}
       <div class="data text-xs text-ink-3">{draft.prefix}</div>
-      <ol class="data grid grid-cols-5 gap-x-3 gap-y-1 border border-line p-3" aria-label="Anahtar grupları">
+      <ol class="data grid grid-cols-5 gap-x-3 gap-y-1 border border-line p-3" aria-label={t("rk.groups")}>
         {#each draft.groups as g, i (i)}
           <li class="flex gap-2 text-sm">
             <span class="w-5 text-right text-2xs leading-5 text-ink-3">{i + 1}</span><span class="text-ink">{g}</span>
@@ -185,28 +185,28 @@
         {/each}
       </ol>
       <div class="flex flex-wrap items-center gap-2">
-        <button class="btn" onclick={copy}><Copy size={14} strokeWidth={1.5} />{copied ? "Kopyalandı" : "Kopyala"}</button>
-        <button class="btn" onclick={exportFile}><Download size={14} strokeWidth={1.5} />Dosyaya kaydet</button>
+        <button class="btn" onclick={copy}><Copy size={14} strokeWidth={1.5} />{copied ? t("rk.copied") : t("rk.copy")}</button>
+        <button class="btn" onclick={exportFile}><Download size={14} strokeWidth={1.5} />{t("rk.saveFile")}</button>
         {#if saved}<span class="data truncate text-2xs text-ink-3">{saved}</span>{/if}
         <span class="flex-1"></span>
-        <button class="btn btn-ghost" onclick={cancel}>Vazgeç</button>
-        <button class="btn btn-primary" onclick={() => (step = "challenge")}>Yazdım, devam</button>
+        <button class="btn btn-ghost" onclick={cancel}>{t("common.cancel")}</button>
+        <button class="btn btn-primary" onclick={() => (step = "challenge")}>{t("rk.continue")}</button>
       </div>
     </section>
   {:else if step === "challenge" && draft}
     <section class="flex flex-col gap-3">
-      <h2 class="label">Sakladığınızı doğrulayın</h2>
-      <p class="text-sm text-ink-2">Yazdığınız anahtardan şu grupları girin:</p>
+      <h2 class="label">{t("rk.confirmTitle")}</h2>
+      <p class="text-sm text-ink-2">{t("rk.enterGroups")}</p>
       <div class="flex gap-3">
         {#each draft.challenge as g (g)}
           <label class="flex flex-col gap-1">
-            <span class="label">Grup {g + 1}</span>
+            <span class="label">{t("rk.group", { n: g + 1 })}</span>
             <input
               class="input data w-24 uppercase"
               maxlength="4"
               value={answers[g] ?? ""}
               oninput={(e) => (answers[g] = (e.currentTarget as HTMLInputElement).value)}
-              aria-label="Grup {g + 1}"
+              aria-label={t("rk.group", { n: g + 1 })}
               spellcheck="false"
               autocomplete="off"
             />
@@ -214,10 +214,10 @@
         {/each}
       </div>
       <div class="flex gap-2">
-        <button class="btn btn-ghost" onclick={() => (step = "show")}>Geri</button>
+        <button class="btn btn-ghost" onclick={() => (step = "show")}>{t("rk.back")}</button>
         <span class="flex-1"></span>
-        <button class="btn btn-ghost" onclick={cancel}>Vazgeç</button>
-        <button class="btn btn-primary" onclick={confirm} disabled={!complete || busy}>Anahtarı kur</button>
+        <button class="btn btn-ghost" onclick={cancel}>{t("common.cancel")}</button>
+        <button class="btn btn-primary" onclick={confirm} disabled={!complete || busy}>{t("rk.install")}</button>
       </div>
     </section>
   {/if}
