@@ -50,6 +50,8 @@ pub struct OnnxSession {
     inputs: Vec<String>,
     /// Girdilerin öğe türü (tensör değilse `None`).
     input_types: Vec<Option<TensorElementType>>,
+    /// Girdilerin şekli; dinamik boyut `-1`.
+    input_shapes: Vec<Vec<i64>>,
     outputs: Vec<String>,
     session: Mutex<Session>,
 }
@@ -78,6 +80,14 @@ impl OnnxSession {
             name: name.into(),
             inputs: session.inputs.iter().map(|i| i.name.clone()).collect(),
             input_types: session.inputs.iter().map(|i| i.input_type.tensor_type()).collect(),
+            input_shapes: session
+                .inputs
+                .iter()
+                .map(|i| match &i.input_type {
+                    ort::value::ValueType::Tensor { shape, .. } => shape.to_vec(),
+                    _ => Vec::new(),
+                })
+                .collect(),
             outputs: session.outputs.iter().map(|o| o.name.clone()).collect(),
             session: Mutex::new(session),
         })
@@ -382,11 +392,39 @@ impl std::fmt::Debug for MclipText {
     }
 }
 
+/// Dinamik uzunluklu metin modelinde en çok belirteç.
+const MAX_TEXT_TOKENS: usize = 128;
+
 impl MclipText {
+    /// Modelin dizi uzunluğu sabitse (Immich dışa aktarımı `[1, 77]`)
+    /// belirteçleyici o uzunluğa kırpar ve `<pad>` ile doldurur; dinamikse
+    /// yalnızca kırpar.
     pub fn load(info: ModelInfo, model: &Path, tokenizer: &Path, threads: usize) -> Result<Self, AiError> {
-        let tokenizer = tokenizers::Tokenizer::from_file(tokenizer)
-            .map_err(|e| AiError::ModelLoad { name: info.name.clone(), reason: e.to_string() })?;
-        Ok(Self { session: OnnxSession::load(&info.name, model, threads)?, tokenizer, info, max_tokens: 128 })
+        let load_err = |reason: String| AiError::ModelLoad { name: info.name.clone(), reason };
+        let mut tokenizer = tokenizers::Tokenizer::from_file(tokenizer).map_err(|e| load_err(e.to_string()))?;
+        let session = OnnxSession::load(&info.name, model, threads)?;
+        let fixed = session
+            .input_shapes
+            .first()
+            .and_then(|s| s.get(1))
+            .and_then(|&d| usize::try_from(d).ok())
+            .filter(|&d| d > 0);
+        let max_tokens = fixed.unwrap_or(MAX_TEXT_TOKENS);
+        tokenizer
+            .with_truncation(Some(tokenizers::TruncationParams { max_length: max_tokens, ..Default::default() }))
+            .map_err(|e| load_err(e.to_string()))?;
+        if let Some(len) = fixed {
+            // XLM-R'de `<pad>` 1'dir (0 değil); maske dolguda 0.
+            let pad_token = "<pad>".to_owned();
+            let pad_id = tokenizer.token_to_id(&pad_token).unwrap_or(1);
+            tokenizer.with_padding(Some(tokenizers::PaddingParams {
+                strategy: tokenizers::PaddingStrategy::Fixed(len),
+                pad_id,
+                pad_token,
+                ..Default::default()
+            }));
+        }
+        Ok(Self { session, tokenizer, info, max_tokens })
     }
 }
 
