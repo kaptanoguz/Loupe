@@ -55,7 +55,7 @@ cargo fmt --check
 cargo clippy -p loupe-ai --features ort --all-targets -- -D warnings
 cargo clippy -p loupe-app --features ort --all-targets -- -D warnings
 # Modeller $XDG_DATA_HOME/loupe/models/ altında: scrfd_10g.onnx, arcface_w600k_r50.onnx,
-# mclip_image.onnx, mclip_text.onnx, mclip_tokenizer.json, libonnxruntime.so.
+# mclip_image.onnx, mclip_text/ (model.onnx + harici ağırlıklar), mclip_tokenizer.json, libonnxruntime.so.
 # Yoksa AI kapalı açılır (etkinlikler yine çalışır). LOUPE_AI=mock deterministik
 # deneme modelini açar, LOUPE_SECRETS=file Secret Service'i atlar.
 scripts/fetch-models.sh status     # durum; install | verify | pin

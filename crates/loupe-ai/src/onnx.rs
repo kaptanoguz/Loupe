@@ -21,6 +21,7 @@ use image::imageops::FilterType;
 use image::{Rgb, RgbImage};
 use ort::session::Session;
 use ort::session::builder::GraphOptimizationLevel;
+use ort::tensor::TensorElementType;
 use ort::value::Tensor;
 
 use crate::AiError;
@@ -47,6 +48,10 @@ pub fn init_runtime(dylib: Option<&Path>) -> Result<(), AiError> {
 pub struct OnnxSession {
     name: String,
     inputs: Vec<String>,
+    /// Girdilerin öğe türü (tensör değilse `None`).
+    input_types: Vec<Option<TensorElementType>>,
+    /// Girdilerin şekli; dinamik boyut `-1`.
+    input_shapes: Vec<Vec<i64>>,
     outputs: Vec<String>,
     session: Mutex<Session>,
 }
@@ -74,6 +79,15 @@ impl OnnxSession {
         Ok(Self {
             name: name.into(),
             inputs: session.inputs.iter().map(|i| i.name.clone()).collect(),
+            input_types: session.inputs.iter().map(|i| i.input_type.tensor_type()).collect(),
+            input_shapes: session
+                .inputs
+                .iter()
+                .map(|i| match &i.input_type {
+                    ort::value::ValueType::Tensor { shape, .. } => shape.to_vec(),
+                    _ => Vec::new(),
+                })
+                .collect(),
             outputs: session.outputs.iter().map(|o| o.name.clone()).collect(),
             session: Mutex::new(session),
         })
@@ -94,6 +108,22 @@ impl OnnxSession {
             res.push((shape.iter().copied().collect(), data.to_vec()));
         }
         Ok(res)
+    }
+
+    /// Belirteç girdisi `[1, n]`: model `int32` istiyorsa i32, yoksa i64
+    /// (Hugging Face dışa aktarımları i64; Immich'in M-CLIP metin modeli i32).
+    fn token_input(&self, index: usize, values: &[u32]) -> Result<ort::session::SessionInputValue<'static>, AiError> {
+        let n = values.len();
+        if self.input_types.get(index).copied().flatten() == Some(TensorElementType::Int32) {
+            let v = values
+                .iter()
+                .map(|&x| i32::try_from(x).map_err(|e| self.infer_err(e)))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Tensor::from_array(([1usize, n], v)).map_err(|e| self.infer_err(e))?.into())
+        } else {
+            let v: Vec<i64> = values.iter().map(|&x| i64::from(x)).collect();
+            Ok(Tensor::from_array(([1usize, n], v)).map_err(|e| self.infer_err(e))?.into())
+        }
     }
 
     fn run_image(&self, chw: Vec<f32>, size: (usize, usize)) -> Result<Vec<Output>, AiError> {
@@ -362,11 +392,39 @@ impl std::fmt::Debug for MclipText {
     }
 }
 
+/// Dinamik uzunluklu metin modelinde en çok belirteç.
+const MAX_TEXT_TOKENS: usize = 128;
+
 impl MclipText {
+    /// Modelin dizi uzunluğu sabitse (Immich dışa aktarımı `[1, 77]`)
+    /// belirteçleyici o uzunluğa kırpar ve `<pad>` ile doldurur; dinamikse
+    /// yalnızca kırpar.
     pub fn load(info: ModelInfo, model: &Path, tokenizer: &Path, threads: usize) -> Result<Self, AiError> {
-        let tokenizer = tokenizers::Tokenizer::from_file(tokenizer)
-            .map_err(|e| AiError::ModelLoad { name: info.name.clone(), reason: e.to_string() })?;
-        Ok(Self { session: OnnxSession::load(&info.name, model, threads)?, tokenizer, info, max_tokens: 128 })
+        let load_err = |reason: String| AiError::ModelLoad { name: info.name.clone(), reason };
+        let mut tokenizer = tokenizers::Tokenizer::from_file(tokenizer).map_err(|e| load_err(e.to_string()))?;
+        let session = OnnxSession::load(&info.name, model, threads)?;
+        let fixed = session
+            .input_shapes
+            .first()
+            .and_then(|s| s.get(1))
+            .and_then(|&d| usize::try_from(d).ok())
+            .filter(|&d| d > 0);
+        let max_tokens = fixed.unwrap_or(MAX_TEXT_TOKENS);
+        tokenizer
+            .with_truncation(Some(tokenizers::TruncationParams { max_length: max_tokens, ..Default::default() }))
+            .map_err(|e| load_err(e.to_string()))?;
+        if let Some(len) = fixed {
+            // XLM-R'de `<pad>` 1'dir (0 değil); maske dolguda 0.
+            let pad_token = "<pad>".to_owned();
+            let pad_id = tokenizer.token_to_id(&pad_token).unwrap_or(1);
+            tokenizer.with_padding(Some(tokenizers::PaddingParams {
+                strategy: tokenizers::PaddingStrategy::Fixed(len),
+                pad_id,
+                pad_token,
+                ..Default::default()
+            }));
+        }
+        Ok(Self { session, tokenizer, info, max_tokens })
     }
 }
 
@@ -385,11 +443,8 @@ impl ClipTextEncoder for MclipText {
             .encode(text, true)
             .map_err(|e| AiError::Inference { model: self.info.name.clone(), reason: e.to_string() })?;
         let n = enc.get_ids().len().min(self.max_tokens);
-        let ids: Vec<i64> = enc.get_ids()[..n].iter().map(|&i| i64::from(i)).collect();
-        let mask: Vec<i64> = enc.get_attention_mask()[..n].iter().map(|&i| i64::from(i)).collect();
-        let err = |e: ort::Error| AiError::Inference { model: self.info.name.clone(), reason: e.to_string() };
-        let ids = Tensor::from_array(([1usize, n], ids)).map_err(err)?;
-        let mask = Tensor::from_array(([1usize, n], mask)).map_err(err)?;
+        let ids = self.session.token_input(0, &enc.get_ids()[..n])?;
+        let mask = self.session.token_input(1, &enc.get_attention_mask()[..n])?;
         let names = &self.session.inputs;
         let (ni, nm) = match (names.first(), names.get(1)) {
             (Some(a), Some(b)) => (a.clone(), b.clone()),
@@ -400,7 +455,7 @@ impl ClipTextEncoder for MclipText {
                 });
             }
         };
-        let out = self.session.run(vec![(ni, ids.into()), (nm, mask.into())])?;
+        let out = self.session.run(vec![(ni, ids), (nm, mask)])?;
         let v = out.into_iter().next().map(|o| o.1).unwrap_or_default();
         Embedding::normalized(v)?.expect_dim(loupe_db::CLIP_DIM)
     }

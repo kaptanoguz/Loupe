@@ -137,7 +137,7 @@ Akış: **seç → ön kontrol → BLAKE3 → tus.**
 | `arcface_w600k_r50.onnx` | yüz vektörü, 512 | aynı zip → `w600k_r50.onnx` | zip + üye SHA-256 |
 | `libonnxruntime.so` | ONNX Runtime 1.22.0 (`ort` rc.10 ile aynı API) | Microsoft GitHub `onnxruntime-linux-x64-1.22.0.tgz` | tgz + üye SHA-256 |
 | `mclip_image.onnx` | CLIP görüntü, 512 | Hugging Face `immich-app/XLM-Roberta-Large-Vit-B-32` `visual/model.onnx` | LFS özeti |
-| `mclip_text.onnx` | CLIP metin (çok dilli), 512 | aynı depo `textual/model.onnx` | LFS özeti |
+| `mclip_text/model.onnx` + harici ağırlıklar | CLIP metin (çok dilli), 512 | aynı depo `textual/` (grafik + 171 ağırlık dosyası, ≈2.2 GB) | LFS özeti / git blob SHA-1 |
 | `mclip_tokenizer.json` | XLM-R belirteçleyici | aynı depo `textual/tokenizer.json` | LFS özeti |
 
 GitHub kaynaklarının boyutu ve SHA-256'sı bu adımda gerçekten indirilip
@@ -150,9 +150,36 @@ korumadır; Hugging Face'in kendisine karşı değildir. `loupe-models pin`
 çözülmüş değerleri manifest biçiminde yazdırır: bir kez çalıştırılıp
 `models.json`'a işlendiğinde M-CLIP de bayt bayt sabitlenmiş olur.
 
+**Harici ağırlıklı grafik (`external_data`).** ONNX dosyası 2 GB'ı
+aşamadığı için M-CLIP metin kodlayıcısı ağırlıklarını grafiğin yanındaki ayrı
+dosyalarda tutar (`onnx__MatMul_*`, `transformer.embeddings.word_embeddings.weight`
+≈1 GB, …). Adım 4'teki ilk sürüm yalnızca 1.3 MB'lık grafiği indiriyordu;
+grafik özeti tuttuğu için "doğrulandı" görünüyor ama ONNX Runtime modeli
+açamıyordu (Oğuz'un makinesinde `make models` ile bulundu). Düzeltme:
+
+- Manifestte dosya `"external_data": true` ve bir alt dizinde
+  (`mclip_text/model.onnx`): ONNX Runtime konumları grafiğin dizinine göre
+  çözer, 171 dosya model dizininin köküne dağılmaz.
+- Grafik indirilip doğrulandıktan sonra protobuf'tan
+  `graph.initializer[].external_data[location]` okunur (yalnızca gereken
+  alanlar; güvensiz konum, ör. `../`, reddedilir).
+- Konumlar aynı Hugging Face dizininin listesinde aranır (sayfalı liste
+  `Link: rel="next"` ile izlenir). LFS dosyası SHA-256 ile; LFS'te olmayan
+  küçük dosya (≤10 MB) git blob SHA-1'i ile doğrulanır. Liste kilit dosyasına
+  (`sources.<id>.external`) yazılır; grafik değişince sıfırlanır.
+- Her ağırlık `.partial/` üzerinden indirilir, doğrulanır, `rename` edilir;
+  doğrulanmış ağırlık yeniden indirilmez. Önceki sürümün kilidiyle kurulan
+  makinede grafik yeniden indirilmeden yalnızca eksikler tamamlanır.
+- Durum: grafik doğru ama ağırlıklardan biri eksik, yarım ya da bozuksa
+  **`incomplete`** ("ağırlık eksik"). Arayüz yoklaması ağırlıklarda yalnızca
+  boyuta bakar; `install` ve `loupe-models status|verify` tam özet
+  karşılaştırır. Uygulama açılışta ağırlıkları tam olmayan modeli ONNX'e
+  vermez. Boyut sütunu grafik + ağırlıkların toplamıdır.
+- `loupe-models pin` harici ağırlıklı kaynağı `hf` olarak bırakır.
+
 Manifest yüklenirken denetlenir: yalnızca `https` (testte döngü adresine
-`http`), 64 haneli hex, sıfır olmayan boyut, düz dosya adı (yol, `..`, gizli
-ad yok), arşiv üyesinde `..` yok, arşiv olmayan kaynaktan tek dosya, bilinen
+`http`), 64 haneli hex, sıfır olmayan boyut, düz dosya adı ya da tek alt
+dizin (`..`, gizli ad yok), `external_data` yalnızca Hugging Face kaynağında, arşiv üyesinde `..` yok, arşiv olmayan kaynaktan tek dosya, bilinen
 kaynak, tekrar yok.
 
 ### 3.2 İndirme ve doğrulama

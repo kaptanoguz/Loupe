@@ -15,6 +15,7 @@
     missing: "yok",
     corrupt: "bozuk",
     unpinned: "özet bilinmiyor",
+    incomplete: "ağırlık eksik",
   };
 
   export const PHASE_NAMES: Record<string, string> = {
@@ -229,7 +230,7 @@
               <td
                 class="px-3 py-1.5 text-right {f.state === 'verified'
                   ? 'text-ink'
-                  : f.state === 'corrupt'
+                  : f.state === 'corrupt' || f.state === 'incomplete'
                     ? 'text-amber'
                     : 'text-ink-3'}"
               >

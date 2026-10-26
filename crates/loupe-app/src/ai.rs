@@ -27,9 +27,25 @@ use serde::Serialize;
 
 use crate::{AppError, AppResult};
 
-/// `$data/models/` altında beklenen dosyalar.
+/// `$data/models/` altında beklenen dosyalar. M-CLIP metin kodlayıcısının
+/// ağırlıkları grafiğin yanındaki ayrı dosyalardadır (`mclip_text/`).
 pub const MODEL_FILES: [&str; 5] =
-    ["scrfd_10g.onnx", "arcface_w600k_r50.onnx", "mclip_image.onnx", "mclip_text.onnx", "mclip_tokenizer.json"];
+    ["scrfd_10g.onnx", "arcface_w600k_r50.onnx", "mclip_image.onnx", "mclip_text/model.onnx", "mclip_tokenizer.json"];
+
+/// Dosya var ve (harici ağırlıklıysa) ağırlıklarının hepsi tam boyutta.
+/// Özet karşılaştırması model yöneticisinindir; burada açılışı yavaşlatmaz.
+fn model_present(dir: &Path, file: &str) -> bool {
+    if !dir.join(file).is_file() {
+        return false;
+    }
+    let Ok(manifest) = loupe_ai::models::Manifest::builtin() else { return true };
+    let Some(f) = manifest.file(file) else { return true };
+    let lock = loupe_ai::models::Lock::load(dir);
+    !matches!(
+        loupe_ai::models::external_state(f, dir, &lock, false),
+        Ok(Some(s)) if s != loupe_ai::models::FileState::Verified
+    )
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AiMode {
@@ -58,7 +74,7 @@ impl AiMode {
     /// ONNX desteği ve model dosyaları varsa `Onnx`, yoksa nedeniyle `Off`.
     #[must_use]
     pub fn detect(dir: &Path) -> Self {
-        let missing: Vec<&str> = MODEL_FILES.iter().copied().filter(|f| !dir.join(f).is_file()).collect();
+        let missing: Vec<&str> = MODEL_FILES.iter().copied().filter(|f| !model_present(dir, f)).collect();
         if !cfg!(feature = "ort") {
             return Self::Off { reason: "bu derleme ONNX Runtime desteği olmadan yapıldı".into() };
         }

@@ -2,7 +2,8 @@
 
 //! Model yöneticisi: manifest denetimi, yerel HTTP sunucusundan indirme,
 //! zip / tar.gz üyesi çıkarma, Hugging Face LFS özet çözümü, kopan indirmenin
-//! `Range` ile sürmesi ve bozuk ya da yanlış özetli dosyanın reddi.
+//! `Range` ile sürmesi, bozuk ya da yanlış özetli dosyanın reddi ve harici
+//! ağırlıklı ONNX grafiğinin ağırlık dosyalarıyla birlikte kurulması.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -12,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::body::Body;
-use axum::extract::{Path as UrlPath, State};
+use axum::extract::{Path as UrlPath, RawQuery, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -21,11 +22,13 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use loupe_ai::AiError;
 use loupe_ai::fetch::{Fetcher, InstallReport, Progress, sha256_hex};
-use loupe_ai::models::{FileState, LOCK_FILE, Lock, Manifest, PARTIAL_DIR, status};
+use loupe_ai::models::{
+    FileState, LOCK_FILE, Lock, Manifest, PARTIAL_DIR, git_blob_sha1, hex, onnx_external_locations, status,
+};
 
 /// Uygulamanın beklediği dosyalar (`loupe-app::ai::MODEL_FILES`).
 const APP_FILES: [&str; 5] =
-    ["scrfd_10g.onnx", "arcface_w600k_r50.onnx", "mclip_image.onnx", "mclip_text.onnx", "mclip_tokenizer.json"];
+    ["scrfd_10g.onnx", "arcface_w600k_r50.onnx", "mclip_image.onnx", "mclip_text/model.onnx", "mclip_tokenizer.json"];
 
 // ───────────────────────────── sahte sunucu ─────────────────────────────
 
@@ -37,11 +40,26 @@ struct Files {
     /// (ad, Range başlığı) — her GET.
     hits: Vec<(String, Option<String>)>,
     hf: serde_json::Value,
+    /// Dizine özel, sayfalı Hugging Face listesi (`?cursor=<n>`).
+    hf_pages: HashMap<String, Vec<serde_json::Value>>,
 }
 
 type Shared = Arc<Mutex<Files>>;
 
 async fn serve_file(State(st): State<Shared>, UrlPath(name): UrlPath<String>, h: HeaderMap) -> Response {
+    serve(&st, name, &h).await
+}
+
+/// `/<org>/<repo>/resolve/<sürüm>/<yol>`: `hf:<yol>` adıyla saklanan dosya.
+async fn serve_resolve(
+    State(st): State<Shared>,
+    UrlPath((_org, _repo, _rev, path)): UrlPath<(String, String, String, String)>,
+    h: HeaderMap,
+) -> Response {
+    serve(&st, format!("hf:{path}"), &h).await
+}
+
+async fn serve(st: &Shared, name: String, h: &HeaderMap) -> Response {
     let range = h.get(header::RANGE).and_then(|v| v.to_str().ok()).map(str::to_owned);
     let (data, cut) = {
         let mut f = st.lock().unwrap();
@@ -73,14 +91,27 @@ async fn serve_file(State(st): State<Shared>, UrlPath(name): UrlPath<String>, h:
     (status, [(header::CONTENT_LENGTH, len.to_string())], body).into_response()
 }
 
-async fn hf_tree(State(st): State<Shared>) -> Json<serde_json::Value> {
-    Json(st.lock().unwrap().hf.clone())
+async fn hf_tree(
+    State(st): State<Shared>,
+    UrlPath((org, repo, _rev, dir)): UrlPath<(String, String, String, String)>,
+    RawQuery(q): RawQuery,
+) -> Response {
+    let f = st.lock().unwrap();
+    let Some(pages) = f.hf_pages.get(&dir) else { return Json(f.hf.clone()).into_response() };
+    let i: usize = q.as_deref().and_then(|q| q.strip_prefix("cursor=")).and_then(|c| c.parse().ok()).unwrap_or(0);
+    let mut res = Json(pages[i].clone()).into_response();
+    if i + 1 < pages.len() {
+        let link = format!("</api/models/{org}/{repo}/tree/main/{dir}?cursor={}>; rel=\"next\"", i + 1);
+        res.headers_mut().insert(header::LINK, link.parse().unwrap());
+    }
+    res
 }
 
 async fn server(files: Shared) -> String {
     let app = Router::new()
         .route("/f/{name}", get(serve_file))
         .route("/api/models/{org}/{repo}/tree/{rev}/{dir}", get(hf_tree))
+        .route("/{org}/{repo}/resolve/{rev}/{*path}", get(serve_resolve))
         .with_state(files);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -252,7 +283,8 @@ fn builtin_manifest_is_valid_and_covers_the_app() {
     }
     assert_eq!(m.file("arcface_w600k_r50.onnx").unwrap().dim, Some(512));
     assert_eq!(m.file("mclip_image.onnx").unwrap().dim, Some(512));
-    assert_eq!(m.file("mclip_text.onnx").unwrap().dim, Some(512));
+    assert_eq!(m.file("mclip_text/model.onnx").unwrap().dim, Some(512));
+    assert!(m.file("mclip_text/model.onnx").unwrap().external_data);
     assert_eq!(m.file("libonnxruntime.so").unwrap().role, "runtime");
     for s in &m.sources {
         assert!(s.url.starts_with("https://"), "{}", s.url);
@@ -419,4 +451,207 @@ async fn non_lfs_hugging_face_file_and_cancel_are_reported() {
     let r = fetcher(&fx.base).install(&fx.manifest, fresh.path(), quiet(), cancel.clone()).await;
     assert!(matches!(r, Err(AiError::Cancelled)), "{r:?}");
     assert!(cancel.load(Ordering::Relaxed));
+}
+
+// ───────────────────────────── harici ağırlıklı ONNX ─────────────────────────────
+
+fn pb_varint(out: &mut Vec<u8>, mut v: u64) {
+    while v >= 0x80 {
+        out.push((v as u8) | 0x80);
+        v >>= 7;
+    }
+    out.push(v as u8);
+}
+
+fn pb_len(field: u64, body: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    pb_varint(&mut out, (field << 3) | 2);
+    pb_varint(&mut out, body.len() as u64);
+    out.extend_from_slice(body);
+    out
+}
+
+fn pb_int(field: u64, v: u64) -> Vec<u8> {
+    let mut out = Vec::new();
+    pb_varint(&mut out, field << 3);
+    pb_varint(&mut out, v);
+    out
+}
+
+/// `TensorProto`: ad (8), boyutlar (1), `data_location = EXTERNAL` (14) ve
+/// `external_data` (13) girdileri.
+fn tensor(name: &str, location: &str) -> Vec<u8> {
+    let entry = |k: &str, v: &str| [pb_len(1, k.as_bytes()), pb_len(2, v.as_bytes())].concat();
+    [
+        pb_int(1, 512),
+        pb_len(8, name.as_bytes()),
+        pb_int(14, 1),
+        pb_len(13, &entry("location", location)),
+        pb_len(13, &entry("offset", "0")),
+    ]
+    .concat()
+}
+
+/// `ModelProto`: ir_version (1), graph (7) içinde düğüm (1) ve başlatıcılar (5), opset (8).
+fn onnx_graph(locations: &[&str]) -> Vec<u8> {
+    let mut graph = pb_len(1, b"\x0a\x01x\x12\x01y\x22\x06MatMul");
+    for (i, loc) in locations.iter().enumerate() {
+        graph.extend(pb_len(5, &tensor(&format!("t{i}"), loc)));
+    }
+    [pb_int(1, 8), pb_len(7, &graph), pb_len(8, &pb_int(2, 17))].concat()
+}
+
+struct TextFixture {
+    files: Shared,
+    base: String,
+    graph: Vec<u8>,
+    big: Vec<u8>,
+    small: Vec<u8>,
+    manifest: Manifest,
+}
+
+/// Grafik + iki ağırlık: biri LFS'te (SHA-256), biri düz git dosyası (SHA-1).
+/// Dizin listesi iki sayfa.
+async fn text_fixture() -> TextFixture {
+    let big = blob(7, 400_000);
+    let small = blob(8, 2_048);
+    // `w_big` iki tensörde: konumlar tekilleştirilir.
+    let graph = onnx_graph(&["w_big", "bias.small", "w_big"]);
+    let files: Shared = Arc::new(Mutex::new(Files::default()));
+    {
+        let mut f = files.lock().unwrap();
+        f.bytes.insert("hf:textual/model.onnx".into(), graph.clone());
+        f.bytes.insert("hf:textual/w_big".into(), big.clone());
+        f.bytes.insert("hf:textual/bias.small".into(), small.clone());
+        let lfs = |path: &str, b: &[u8]| {
+            serde_json::json!({ "type": "file", "path": path, "size": 134,
+                "lfs": { "oid": sha256_hex(b), "size": b.len(), "pointerSize": 134 } })
+        };
+        f.hf_pages.insert(
+            "textual".into(),
+            vec![
+                serde_json::json!([lfs("textual/model.onnx", &graph), { "type": "file", "path": "textual/config.json", "size": 2, "oid": "0".repeat(40) }]),
+                serde_json::json!([
+                    lfs("textual/w_big", &big),
+                    { "type": "file", "path": "textual/bias.small", "size": small.len(), "oid": hex(&git_blob_sha1(&small)) },
+                    { "type": "directory", "path": "textual/sub" }
+                ]),
+            ],
+        );
+    }
+    let base = server(files.clone()).await;
+    let json = serde_json::json!({
+        "version": 1,
+        "sources": [
+            { "id": "text", "url": format!("{base}/org/clip/resolve/main/textual/model.onnx"),
+              "hf": { "repo": "org/clip", "revision": "main", "path": "textual/model.onnx" } }
+        ],
+        "files": [
+            { "file": "mclip_text/model.onnx", "role": "clip_text", "dim": 512, "source": "text", "external_data": true }
+        ]
+    });
+    let manifest = Manifest::parse(&json.to_string()).unwrap();
+    TextFixture { files, base, graph, big, small, manifest }
+}
+
+#[test]
+fn onnx_external_locations_are_read_from_the_graph() {
+    let tmp = tempfile::tempdir().unwrap();
+    let p = tmp.path().join("m.onnx");
+    std::fs::write(&p, onnx_graph(&["a.weight", "onnx__MatMul_1", "a.weight"])).unwrap();
+    assert_eq!(onnx_external_locations(&p).unwrap(), ["a.weight", "onnx__MatMul_1"]);
+    std::fs::write(&p, onnx_graph(&[])).unwrap();
+    assert!(onnx_external_locations(&p).unwrap().is_empty());
+    // Grafik dizinin dışına yazdıramaz; kesik dosya hata verir.
+    std::fs::write(&p, onnx_graph(&["../../.bashrc"])).unwrap();
+    assert!(onnx_external_locations(&p).is_err());
+    let g = onnx_graph(&["a"]);
+    std::fs::write(&p, &g[..g.len() - 3]).unwrap();
+    assert!(onnx_external_locations(&p).is_err());
+}
+
+#[test]
+fn external_data_requires_hugging_face_and_a_subdirectory() {
+    let good = Manifest::builtin().unwrap();
+    let i = good.files.iter().position(|f| f.external_data).unwrap();
+    for edit in [
+        |f: &mut loupe_ai::models::ModelFile| f.file = "mclip_text.onnx".into(),
+        |f: &mut loupe_ai::models::ModelFile| f.file = "a/b/c.onnx".into(),
+        |f: &mut loupe_ai::models::ModelFile| f.file = "../c/model.onnx".into(),
+        |f: &mut loupe_ai::models::ModelFile| f.source = "insightface-buffalo_l".into(),
+    ] {
+        let mut m = good.clone();
+        edit(&mut m.files[i]);
+        assert!(Manifest::parse(&serde_json::to_string(&m).unwrap()).is_err(), "{:?}", m.files[i]);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn external_weights_are_installed_next_to_the_graph_and_completed_later() {
+    let fx = text_fixture().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    let report = install(&fetcher(&fx.base), &fx.manifest, dir).await.unwrap();
+    assert!(report.failed.is_empty(), "{:?}", report.failed);
+    let sub = dir.join("mclip_text");
+    assert_eq!(std::fs::read(sub.join("model.onnx")).unwrap(), fx.graph);
+    assert_eq!(std::fs::read(sub.join("w_big")).unwrap(), fx.big);
+    assert_eq!(std::fs::read(sub.join("bias.small")).unwrap(), fx.small);
+    let st = status(&fx.manifest, dir).unwrap();
+    assert_eq!(st[0].state, FileState::Verified);
+    assert_eq!(st[0].size, Some((fx.graph.len() + fx.big.len() + fx.small.len()) as u64));
+    let lock = Lock::load(dir);
+    let ext = lock.external("text").unwrap();
+    assert_eq!(ext.keys().collect::<Vec<_>>(), ["bias.small", "w_big"]);
+    assert_eq!(ext["w_big"].sha256.as_deref(), Some(sha256_hex(&fx.big).as_str()));
+    assert_eq!(ext["bias.small"].git_sha1.as_deref(), Some(hex(&git_blob_sha1(&fx.small)).as_str()));
+    assert_eq!(std::fs::read_dir(dir.join(PARTIAL_DIR)).unwrap().count(), 0);
+
+    // Ağırlığı eksik grafik "ağırlık eksik": kurulum yalnızca eksiği indirir.
+    std::fs::remove_file(sub.join("w_big")).unwrap();
+    assert_eq!(status(&fx.manifest, dir).unwrap()[0].state, FileState::Incomplete);
+    let before = hits(&fx.files);
+    let again = install(&fetcher(&fx.base), &fx.manifest, dir).await.unwrap();
+    assert!(again.failed.is_empty(), "{:?}", again.failed);
+    let new: Vec<_> = hits(&fx.files)[before.len()..].iter().map(|(n, _)| n.clone()).collect();
+    assert_eq!(new, ["hf:textual/w_big"]);
+    assert_eq!(status(&fx.manifest, dir).unwrap()[0].state, FileState::Verified);
+
+    // Aynı boyda ama değişmiş küçük ağırlık yakalanır ve yenilenir.
+    let mut b = fx.small.clone();
+    b[0] ^= 1;
+    std::fs::write(sub.join("bias.small"), &b).unwrap();
+    assert_eq!(status(&fx.manifest, dir).unwrap()[0].state, FileState::Incomplete);
+    install(&fetcher(&fx.base), &fx.manifest, dir).await.unwrap();
+    assert_eq!(std::fs::read(sub.join("bias.small")).unwrap(), fx.small);
+
+    // Önceki sürümün kilidi (ağırlık listesi yok): grafik yeniden indirilmeden liste çözülür.
+    let mut lock = Lock::load(dir);
+    lock.sources.get_mut("text").unwrap().external = None;
+    lock.save(dir).unwrap();
+    assert_eq!(status(&fx.manifest, dir).unwrap()[0].state, FileState::Incomplete);
+    let before = hits(&fx.files).len();
+    install(&fetcher(&fx.base), &fx.manifest, dir).await.unwrap();
+    assert!(hits(&fx.files)[before..].is_empty(), "doğrulanmış dosyalar yeniden indirilmez");
+    assert_eq!(status(&fx.manifest, dir).unwrap()[0].state, FileState::Verified);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bad_or_missing_external_weight_is_reported_and_model_stays_incomplete() {
+    let fx = text_fixture().await;
+    fx.files.lock().unwrap().bytes.get_mut("hf:textual/bias.small").unwrap()[5] ^= 1;
+    let tmp = tempfile::tempdir().unwrap();
+    let report = install(&fetcher(&fx.base), &fx.manifest, tmp.path()).await.unwrap();
+    assert_eq!(report.failed.len(), 1);
+    assert!(report.failed[0].reason.contains("bias.small"), "{}", report.failed[0].reason);
+    assert!(!tmp.path().join("mclip_text/bias.small").exists());
+    assert_eq!(status(&fx.manifest, tmp.path()).unwrap()[0].state, FileState::Incomplete);
+
+    // Grafiğin istediği dosya depoda yok.
+    let fx = text_fixture().await;
+    fx.files.lock().unwrap().hf_pages.get_mut("textual").unwrap()[1] = serde_json::json!([{ "type": "file", "path": "textual/w_big", "size": 1, "lfs": { "oid": sha256_hex(&fx.big), "size": fx.big.len() } }]);
+    let fresh = tempfile::tempdir().unwrap();
+    let report = install(&fetcher(&fx.base), &fx.manifest, fresh.path()).await.unwrap();
+    assert_eq!(report.failed.len(), 1);
+    assert!(report.failed[0].reason.contains("depoda yok"), "{}", report.failed[0].reason);
 }
