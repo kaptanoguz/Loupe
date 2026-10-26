@@ -116,8 +116,9 @@
       catalog.clearMarks();
       void catalog.open(catalog.view);
       void catalog.refreshSidebar();
+      const local = r.loupeTrash > 0 ? ` (${r.loupeTrash} tanesi bu diskte Çöp Kutusu olmadığından ${r.loupeTrashDir} klasörüne)` : "";
       if (r.failed.length > 0) catalog.error = `${r.trashed} fotoğraf taşındı · ${r.failed.length} taşınamadı: ${r.failed[0]?.reason}`;
-      else catalog.flash(`${r.trashed} fotoğraf Çöp Kutusu'na taşındı`);
+      else catalog.flash(`${r.trashed} fotoğraf Çöp Kutusu'na taşındı${local}`);
     } catch (e) {
       fail(e);
     }

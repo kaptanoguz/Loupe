@@ -197,6 +197,9 @@ export interface ImportRequest {
 /** Çöp Kutusu'na taşıma sonucu; taşınamayanlar katalogda kalır. */
 export interface TrashResultDto {
   trashed: number;
+  /** Sistem Çöp Kutusu kurulamayan diskte `.loupe/trash/` klasörüne taşınanlar. */
+  loupeTrash: number;
+  loupeTrashDir: string | null;
   failed: { id: number; reason: string }[];
 }
 

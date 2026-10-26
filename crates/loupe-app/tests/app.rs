@@ -670,13 +670,13 @@ async fn removing_a_library_forgets_its_photos_but_keeps_files() {
 struct FakeTrash(PathBuf);
 
 impl loupe_app::trash::Trasher for FakeTrash {
-    fn trash(&self, paths: &[PathBuf]) -> loupe_app::AppResult<()> {
+    fn trash(&self, paths: &[PathBuf]) -> loupe_app::AppResult<String> {
         for p in paths {
             if !p.to_string_lossy().contains("KILITLI") {
                 fs::rename(p, self.0.join(p.file_name().unwrap())).unwrap();
             }
         }
-        Ok(())
+        Ok("gio: çöp dizini oluşturulamıyor".into())
     }
 }
 
@@ -689,6 +689,7 @@ fn trashing_photos_moves_files_and_sidecars_then_forgets_them() {
     fs::write(fx.lib_root.join("IMG_A.JPG.loupe.json"), b"{}").unwrap();
     let (_, scan) = fx.core.add_library_root(&fx.lib_root, Some("Fotoğraflar"), true).unwrap();
     wait_done(&fx.core, scan.unwrap().id);
+    fs::write(fx.lib_root.join("KILITLI.JPG.loupe.json"), b"{}").unwrap();
     let by_name = |name: &str| {
         fx.all_ids()
             .into_iter()
@@ -702,9 +703,14 @@ fn trashing_photos_moves_files_and_sidecars_then_forgets_them() {
     fs::remove_file(fx.lib_root.join("IMG_B.JPG")).unwrap();
 
     let out = fx.core.trash_media_with(&[a, b, locked, 999_999], &FakeTrash(bin.clone())).unwrap();
-    assert_eq!(out.trashed, 2);
-    assert_eq!(out.failed.iter().map(|f| f.id).collect::<Vec<_>>(), vec![locked]);
+    assert_eq!(out.trashed, 3);
+    assert!(out.failed.is_empty(), "{:?}", out.failed);
     assert!(bin.join("IMG_A.JPG").is_file() && bin.join("IMG_A.JPG.loupe.json").is_file(), "sidecar birlikte");
-    assert!(fx.lib_root.join("KILITLI.JPG").is_file());
-    assert_eq!(fx.all_ids(), vec![locked]);
+    // Sistem Çöp Kutusu'nun kabul etmediği dosya aynı diskte `.loupe/trash/<gün>/`e gider.
+    assert_eq!(out.loupe_trash, 1);
+    let day = PathBuf::from(out.loupe_trash_dir.unwrap());
+    assert!(day.starts_with(fx.lib_root.join(".loupe/trash")));
+    assert!(day.join("KILITLI.JPG").is_file() && day.join("KILITLI.JPG.loupe.json").is_file());
+    assert!(!fx.lib_root.join("KILITLI.JPG").exists());
+    assert!(fx.all_ids().is_empty());
 }

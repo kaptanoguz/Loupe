@@ -525,7 +525,7 @@ export class MockBackend implements Backend {
     return [];
   }
   async trashMedia(ids: number[]): Promise<TrashResultDto> {
-    return { trashed: ids.length, failed: [] };
+    return { trashed: ids.length, loupeTrash: 0, loupeTrashDir: null, failed: [] };
   }
   async removeLibrary(id: number): Promise<number> {
     const lib = this.libraries.find((l) => l.id === id);
