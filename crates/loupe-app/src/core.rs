@@ -169,6 +169,7 @@ impl AppCore {
         culling::flush_dirty_sidecars(&core.libraries, &core.pool, 10_000)?;
         core.start_workers()?;
         core.restart_watchers()?;
+        core.scan_unscanned_libraries();
         // Model sonradan geldiyse eski fotoğraflar; her açılışta bir etkinlik kümelemesi.
         ai::backfill(&core.pool, &core.queue, core.ai.active())?;
         Ok(core)
@@ -321,7 +322,10 @@ impl AppCore {
         Ok(libs)
     }
 
-    /// Klasörü kütüphane olarak ekler. Referans kütüphanesi hemen taranır.
+    /// Klasörü kütüphane olarak ekler ve içindeki mevcut fotoğrafları yerinde
+    /// kataloglar. Yönetilen kütüphane de taranır: içe aktarma hedefi olması
+    /// klasörde zaten duran fotoğrafları gizlememeli (dosyalara dokunulmaz,
+    /// yerleşimleri `Reference` kalır).
     pub fn add_library_root(
         self: &Arc<Self>,
         path: &std::path::Path,
@@ -330,8 +334,28 @@ impl AppCore {
     ) -> AppResult<(LibraryDto, Option<ImportSessionDto>)> {
         let lib = self.libraries.add_root(path, name, managed)?;
         self.restart_watchers()?;
-        let scan = if lib.managed { None } else { Some(self.imports.scan_reference(LibraryId(lib.id))?) };
+        let scan = match lib.root {
+            Some(_) => Some(self.imports.scan_reference(LibraryId(lib.id))?),
+            None => None,
+        };
         Ok((lib, scan))
+    }
+
+    /// Hiç taranmamış çevrimiçi kütüphaneler (önceki sürümde eklenen yönetilen
+    /// kütüphaneler taranmıyordu) açılışta bir kez yerinde taranır.
+    fn scan_unscanned_libraries(self: &Arc<Self>) {
+        let Ok(libs) = self.libraries.list() else { return };
+        for lib in libs.iter().filter(|l| l.root.is_some()) {
+            let scanned = self.pool.read(|c| {
+                Ok(c.query_row("SELECT EXISTS(SELECT 1 FROM import_sessions WHERE library_id = ?1)", [lib.id], |r| {
+                    r.get::<_, bool>(0)
+                })?)
+            });
+            if matches!(scanned, Ok(false)) {
+                // Tarama arka planda; başlatılamazsa (disk az önce çıkarıldı) sonraki açılışta denenir.
+                let _ignored = self.imports.scan_reference(LibraryId(lib.id));
+            }
+        }
     }
 
     pub fn start_import(&self, req: &ImportRequest) -> AppResult<ImportSessionDto> {

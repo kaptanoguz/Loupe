@@ -165,19 +165,115 @@ pub fn qr_svg(data: &str) -> AppResult<String> {
     ))
 }
 
-/// QR'a girecek yerel adresler: döngü dışı, özel ağ (Wi-Fi/Ethernet).
+/// QR'a girecek yerel adresler: telefonun aynı Wi-Fi'dan ulaşabileceği
+/// açık arayüzler. Sanal köprüler (Docker, LXC, libvirt…) ve VPN tünelleri
+/// elenir; varsayılan rotanın arayüzü (çoğunlukla Wi-Fi) başa gelir.
 #[must_use]
 pub fn local_addrs() -> Vec<std::net::IpAddr> {
-    let mut out: Vec<std::net::IpAddr> = if_addrs::get_if_addrs()
-        .map(|v| {
-            v.into_iter().map(|i| i.ip()).filter(|ip| !ip.is_loopback() && loupe_lan::server::is_lan(*ip)).collect()
-        })
+    let ifaces: Vec<LanIface> = if_addrs::get_if_addrs()
+        .map(|v| v.into_iter().map(|i| LanIface { up: iface_up(&i.name), ip: i.ip(), name: i.name }).collect())
         .unwrap_or_default();
-    // IPv4 önce: telefonlar çoğunlukla onunla bağlanır.
-    out.sort_by_key(|ip| (ip.is_ipv6(), *ip));
-    out.dedup();
+    select_lan_addrs(&ifaces, default_route_iface().as_deref())
+}
+
+/// Arayüz adı, adresi ve açık olup olmadığı.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LanIface {
+    pub name: String,
+    pub ip: std::net::IpAddr,
+    pub up: bool,
+}
+
+/// Telefonun ulaşamayacağı arayüzler: konteyner/sanal makine köprüleri ve VPN.
+fn virtual_iface(name: &str) -> bool {
+    const PREFIXES: [&str; 20] = [
+        "docker",
+        "br-",
+        "virbr",
+        "lxcbr",
+        "lxdbr",
+        "veth",
+        "vnet",
+        "vmnet",
+        "vboxnet",
+        "waydroid",
+        "cni",
+        "flannel",
+        "podman",
+        "tun",
+        "tap",
+        "wg",
+        "proton",
+        "tailscale",
+        "zt",
+        "nordlynx",
+    ];
+    PREFIXES.iter().any(|p| name.starts_with(p))
+}
+
+/// Saf seçim (test edilebilir): açık, sanal olmayan, özel ağ adresleri;
+/// sıra: varsayılan rota arayüzü, Wi-Fi (`wl*`), Ethernet (`en*`/`eth*`),
+/// diğerleri; her grupta IPv4 önce. En çok 4 adres.
+#[must_use]
+pub fn select_lan_addrs(ifaces: &[LanIface], default_iface: Option<&str>) -> Vec<std::net::IpAddr> {
+    let mut picked: Vec<(u8, bool, std::net::IpAddr)> = ifaces
+        .iter()
+        .filter(|i| i.up && !virtual_iface(&i.name))
+        .filter(|i| !i.ip.is_loopback() && !link_local(i.ip) && loupe_lan::server::is_lan(i.ip))
+        .map(|i| {
+            let rank = if Some(i.name.as_str()) == default_iface {
+                0
+            } else if i.name.starts_with("wl") {
+                1
+            } else if i.name.starts_with("en") || i.name.starts_with("eth") {
+                2
+            } else {
+                3
+            };
+            (rank, i.ip.is_ipv6(), i.ip)
+        })
+        .collect();
+    picked.sort();
+    let mut out: Vec<std::net::IpAddr> = Vec::new();
+    for (_, _, ip) in picked {
+        if !out.contains(&ip) {
+            out.push(ip);
+        }
+    }
     out.truncate(4);
     out
+}
+
+/// Bağlantı yerel adresi (`169.254/16`, `fe80::/10`): IPv6'da bölge kimliği
+/// olmadan tarayıcı adresine yazılamaz, IPv4'te DHCP yok demektir.
+fn link_local(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => v4.is_link_local(),
+        std::net::IpAddr::V6(v6) => (v6.segments()[0] & 0xffc0) == 0xfe80,
+    }
+}
+
+/// Linux: `/sys/class/net/<ad>/operstate`. Okunamazsa (başka sistem) açık sayılır.
+fn iface_up(name: &str) -> bool {
+    std::fs::read_to_string(format!("/sys/class/net/{name}/operstate"))
+        .map(|s| matches!(s.trim(), "up" | "unknown"))
+        .unwrap_or(true)
+}
+
+/// Linux: `/proc/net/route`'ta hedefi 0.0.0.0 olan, en düşük metrikli ve
+/// sanal olmayan arayüz.
+fn default_route_iface() -> Option<String> {
+    let table = std::fs::read_to_string("/proc/net/route").ok()?;
+    table
+        .lines()
+        .skip(1)
+        .filter_map(|l| {
+            let f: Vec<&str> = l.split_whitespace().collect();
+            let (name, dest, metric) = (*f.first()?, *f.get(1)?, f.get(6)?.parse::<u32>().ok()?);
+            (dest == "00000000" && !virtual_iface(name)).then(|| (metric, name.to_owned()))
+        })
+        .min()
+        .map(|(_, name)| name)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -343,7 +439,7 @@ impl Network {
             self.set_lan_error(Some(("no_library", "yönetilen çevrimiçi kütüphane yok".into())))?;
             return Ok(None);
         };
-        let started = async {
+        let start = |bind: SocketAddr| async move {
             let identity = load_or_create_identity(self.secrets.as_ref(), name)?;
             let importer = self.libraries.importer(lib)?;
             // Eşleşme ancak masaüstünde QR gösterilince açılır (jeton yalnızca o an üretilir).
@@ -357,8 +453,13 @@ impl Network {
             )
             .await?;
             Ok::<_, AppError>(server)
+        };
+        // Sabit port: telefon tarayıcısındaki oturum (köken = adres + port) yeniden
+        // açılışta da geçerli kalır. Port doluysa rastgele porta düşülür.
+        let mut started = start(bind).await;
+        if started.is_err() && bind.port() != 0 {
+            started = start(SocketAddr::new(bind.ip(), 0)).await;
         }
-        .await;
         let server = match started {
             Ok(s) => s,
             Err(e) => {
@@ -656,5 +757,51 @@ async fn cloud_loop(
             () = wake.notified() => {}
             () = tokio::time::sleep(CLOUD_IDLE) => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::{LanIface, select_lan_addrs};
+
+    fn iface(name: &str, ip: &str, up: bool) -> LanIface {
+        LanIface { name: name.into(), ip: ip.parse().unwrap(), up }
+    }
+
+    #[test]
+    fn qr_prefers_the_wifi_address_over_bridges_and_vpn() {
+        // oguz-mint: LXC/Docker köprüleri ve Proton VPN, gerçek Wi-Fi'dan önce sıralanıyordu.
+        let ifaces = [
+            iface("lo", "127.0.0.1", true),
+            iface("lxcbr0", "10.0.3.1", false),
+            iface("proton0", "10.2.0.2", true),
+            iface("docker0", "172.17.0.1", false),
+            iface("br-3f2a", "172.18.0.1", true),
+            iface("wlp0s20f3", "192.168.18.130", true),
+            iface("wlp0s20f3", "fe80::1", true),
+        ];
+        let want: Vec<std::net::IpAddr> = vec!["192.168.18.130".parse().unwrap()];
+        assert_eq!(select_lan_addrs(&ifaces, Some("wlp0s20f3")), want);
+        // Varsayılan rota bilinmese de Wi-Fi seçilir.
+        assert_eq!(select_lan_addrs(&ifaces, None), want);
+    }
+
+    #[test]
+    fn default_route_comes_first_then_wifi_then_ethernet() {
+        let ifaces = [
+            iface("enp3s0", "192.168.1.10", true),
+            iface("wlan0", "192.168.1.20", true),
+            iface("eth1", "10.0.0.5", true),
+            iface("usb0", "192.168.42.10", true),
+        ];
+        let got: Vec<String> = select_lan_addrs(&ifaces, Some("eth1")).iter().map(ToString::to_string).collect();
+        assert_eq!(got, ["10.0.0.5", "192.168.1.20", "192.168.1.10", "192.168.42.10"]);
+        // Kapalı arayüz ve yalnızca sanal arayüzler: adres yok.
+        assert!(
+            select_lan_addrs(&[iface("wlan0", "192.168.1.20", false), iface("tun0", "10.8.0.2", true)], None)
+                .is_empty()
+        );
     }
 }

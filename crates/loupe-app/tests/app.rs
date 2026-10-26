@@ -60,7 +60,9 @@ impl Fx {
 
     fn add_library(&self) -> i64 {
         let (lib, scan) = self.core.add_library_root(&self.lib_root, Some("Fotoğraflar"), true).unwrap();
-        assert!(scan.is_none());
+        // Boş klasör de yerinde taranır (bulacak bir şey yok).
+        let s = wait_done(&self.core, scan.unwrap().id);
+        assert_eq!((s.state, s.total_files), ("done", 0));
         assert_eq!(lib.state, "online");
         assert!(lib.managed && lib.primary);
         lib.id
@@ -558,4 +560,51 @@ async fn network_starts_lan_advertises_and_backs_up_to_local_target() {
 
     fx.core.shutdown().await;
     assert!(net.browse(Duration::from_millis(10)).unwrap().is_empty(), "kapanışta duyuru geri çekilir");
+}
+
+#[test]
+fn managed_library_with_existing_photos_is_indexed_in_place() {
+    let fx = Fx::new();
+    let sub = fx.lib_root.join("2019/Tatil");
+    fs::create_dir_all(&sub).unwrap();
+    write_jpeg(&fx.lib_root.join("IMG_A.JPG"), 200, 150, 11, 0);
+    write_jpeg(&sub.join("IMG_B.JPG"), 150, 200, 12, 3);
+    fs::write(sub.join("notlar.txt"), b"medya degil").unwrap();
+
+    let (lib, scan) = fx.core.add_library_root(&fx.lib_root, Some("Resimler"), true).unwrap();
+    assert!(lib.managed && lib.primary, "içe aktarma hedefi olarak kalır");
+    let s = wait_done(&fx.core, scan.expect("yönetilen kütüphane de taranır").id);
+    assert_eq!((s.state, s.done_files), ("done", 2), "{s:?}");
+    assert_eq!(fx.all_ids().len(), 2);
+    for id in fx.all_ids() {
+        let m = fx.core.pool().read(|c| media::get(c, MediaId(id))).unwrap().unwrap();
+        assert_eq!(m.placement, loupe_core::Placement::Reference, "mevcut dosya taşınmaz");
+        assert!(fx.lib_root.join(m.rel_path.as_str()).is_file());
+    }
+
+    // Önceki sürümde eklenip hiç taranmamış kütüphane: açılışta bir kez taranır.
+    let dir = fx.tmp.path().to_path_buf();
+    fx.core.pool().write(|c| Ok(c.execute_batch("DELETE FROM import_sessions;")?)).unwrap();
+    drop(fx.core);
+    // Uygulama kapalıyken klasöre gelen fotoğraf (izleyici görmedi).
+    write_jpeg(&sub.join("IMG_C.JPG"), 160, 120, 13, 5);
+    let core = AppCore::open(AppConfig::in_dir(&dir)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let n: i64 =
+            core.pool().read(|c| Ok(c.query_row("SELECT count(*) FROM media_files", [], |r| r.get(0))?)).unwrap();
+        if n == 3 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "açılış taraması bitmedi ({n})");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    // Taranmış kütüphane bir daha açılışta taranmaz.
+    let sessions = |c: &AppCore| -> i64 {
+        c.pool().read(|c| Ok(c.query_row("SELECT count(*) FROM import_sessions", [], |r| r.get(0))?)).unwrap()
+    };
+    let before = sessions(&core);
+    drop(core);
+    let core = AppCore::open(AppConfig::in_dir(&dir)).unwrap();
+    assert_eq!(sessions(&core), before);
 }
