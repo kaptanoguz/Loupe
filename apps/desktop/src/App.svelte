@@ -18,6 +18,7 @@
   import ImportDialog, { type ImportSource } from "./lib/components/ImportDialog.svelte";
   import AlbumPicker from "./lib/components/AlbumPicker.svelte";
   import ContextMenu from "./lib/components/ContextMenu.svelte";
+  import Editor from "./lib/components/Editor.svelte";
   import Slideshow from "./lib/components/Slideshow.svelte";
   import WifiModal from "./lib/components/WifiModal.svelte";
   import { LayoutEngine } from "./lib/layout/engine";
@@ -49,6 +50,7 @@
     void catalog.refreshSidebar();
     void catalog.open({ kind: "all" });
     void catalog.refreshStatus();
+    void catalog.loadEditors();
     statusTimer = setInterval(() => void catalog.refreshStatus(), STATUS_POLL_MS);
   });
 
@@ -187,6 +189,7 @@
       label: catalog.status?.ai.paused ? t("cmd.aiResume") : t("cmd.aiPause"),
       hint: t("cmd.aiHint"),
     },
+    { id: "edit", label: t("cmd.edit"), hint: t("cmd.editHint") },
     { id: "slideshow", label: t("cmd.slideshow"), hint: t("cmd.slideshowHint") },
     { id: "people", label: t("cmd.people"), hint: t("cmd.peopleHint") },
     { id: "events", label: t("cmd.events"), hint: t("cmd.eventsHint") },
@@ -233,6 +236,10 @@
           catalog.overlay = null;
           catalog.startSlideshow();
           break;
+        case "edit":
+          catalog.overlay = null;
+          catalog.openEditor();
+          break;
         case "people":
         case "events":
           void catalog.open({ kind: id });
@@ -249,6 +256,8 @@
 
   function onkeydown(e: KeyboardEvent): void {
     if (e.defaultPrevented) return;
+    // Düzenleme ekranı kendi tuşlarını işler.
+    if (catalog.editorOpen) return;
     if (catalog.slideshow) {
       if (catalog.slideKey(e.key)) e.preventDefault();
       return;
@@ -326,6 +335,9 @@
 
 {#if catalog.slideshow}
   <Slideshow {catalog} />
+{/if}
+{#if catalog.editorOpen && catalog.selectedItem}
+  <Editor {catalog} />
 {/if}
 {#if catalog.menu}
   <ContextMenu {catalog} x={catalog.menu.x} y={catalog.menu.y} />

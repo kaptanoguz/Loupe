@@ -3,10 +3,16 @@
  * Deterministik: aynı tohum aynı kataloğu üretir. `?mock=100000` ile büyük
  * kütüphane davranışı (sanal kaydırma, düzen süresi) Tauri olmadan denenir.
  */
+import { editedAspect, isIdentity, normalized } from "../edit/recipe";
 import { layoutError } from "../importLayout";
 import type { Backend } from "./backend";
 import type {
   AddedLibrary,
+  AutoTone,
+  EditRecipe,
+  EditStateDto,
+  ExportDto,
+  ExternalEditorDto,
   AiStatusDto,
   AlbumDto,
   ModelsDto,
@@ -166,6 +172,7 @@ export class MockBackend implements Backend {
         sync: pick(r, SYNCS),
         takenAtUtc: t,
         tzOffsetMin: 180,
+        edit: 0,
       });
     }
     for (const it of this.items) if (it.video) it.durationMs = 5000 + (it.id % 60) * 1000;
@@ -550,6 +557,70 @@ export class MockBackend implements Backend {
     return lib?.mediaCount ?? 0;
   }
   async openMedia(): Promise<void> {}
+
+  private edits = new Map<number, { recipe: EditRecipe; base: number }>();
+  private editRevision = 0;
+  exported: number[] = [];
+  openedIn: [number, string][] = [];
+
+  private editItem(id: number): TileItem {
+    const it = this.items.find((i) => i.id === id);
+    if (!it) throw { code: "NOT_FOUND", message: `medya ${id} yok` };
+    return it;
+  }
+
+  private editDto(it: TileItem): EditStateDto {
+    const e = this.edits.get(it.id);
+    const recipe = e?.recipe ?? normalized({ quarter: 0, straighten: 0, crop: null, brightness: 0, contrast: 0, temperature: 0 });
+    return { id: it.id, revision: it.edit, recipe, aspect: it.aspect, sidecar: "written" };
+  }
+
+  async editState(id: number): Promise<EditStateDto> {
+    return this.editDto(this.editItem(id));
+  }
+
+  async saveEdit(id: number, recipe: EditRecipe): Promise<EditStateDto> {
+    const it = this.editItem(id);
+    if (it.video) throw { code: "INVALID", message: "videolar düzenlenemez" };
+    const base = this.edits.get(id)?.base ?? it.aspect;
+    const r = normalized(recipe);
+    if (isIdentity(r)) {
+      this.edits.delete(id);
+      it.edit = 0;
+      it.aspect = base;
+    } else {
+      this.edits.set(id, { recipe: r, base });
+      it.edit = ++this.editRevision;
+      it.aspect = editedAspect(base, r);
+    }
+    return this.editDto(it);
+  }
+
+  async revertEdit(id: number): Promise<EditStateDto> {
+    return this.saveEdit(id, { quarter: 0, straighten: 0, crop: null, brightness: 0, contrast: 0, temperature: 0 });
+  }
+
+  async autoTone(id: number): Promise<AutoTone> {
+    this.editItem(id);
+    return { brightness: 12, contrast: 18, temperature: -6 };
+  }
+
+  async exportEdit(id: number): Promise<ExportDto | null> {
+    this.editItem(id);
+    this.exported.push(id);
+    return { path: `/home/oguz/Resimler/2026/10/IMG_${id}-edit.jpg`, width: 6000, height: 4000, lowRes: false };
+  }
+
+  async externalEditors(): Promise<ExternalEditorDto[]> {
+    return [
+      { id: "darktable", name: "Darktable" },
+      { id: "gimp", name: "GIMP" },
+    ];
+  }
+
+  async openInEditor(id: number, editor: ExternalEditorDto["id"]): Promise<void> {
+    this.openedIn.push([id, editor]);
+  }
   revealed: number[] = [];
   async revealMedia(id: number): Promise<string> {
     this.revealed.push(id);

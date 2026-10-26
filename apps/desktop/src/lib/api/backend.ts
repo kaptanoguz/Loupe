@@ -13,6 +13,11 @@ import type {
   AlbumDto,
   ModelsDto,
   AppErrorDto,
+  AutoTone,
+  EditRecipe,
+  EditStateDto,
+  ExportDto,
+  ExternalEditorDto,
   CloudSettingsDto,
   CloudTargetInput,
   CloudTargetStatusDto,
@@ -135,8 +140,22 @@ export interface Backend {
   cancelVerify(library?: number): Promise<number>;
   verifyRuns(limit?: number): Promise<VerifyRunDto[]>;
 
-  /** `<img src>` için küçük resim (ya da `orig`: tam çözünürlük) adresi. */
-  thumbUrl(size: ImageSize, hash: string): string;
+  editState(id: number): Promise<EditStateDto>;
+  /** Tarifi kaydeder (her şey sıfırsa orijinale döner). */
+  saveEdit(id: number, recipe: EditRecipe): Promise<EditStateDto>;
+  revertEdit(id: number): Promise<EditStateDto>;
+  /** Tek tıkla iyileştirme önerisi; kaydetmez. */
+  autoTone(id: number): Promise<AutoTone>;
+  /** Kaydetme penceresi ve JPEG; vazgeçildiyse `null`. */
+  exportEdit(id: number): Promise<ExportDto | null>;
+  externalEditors(): Promise<ExternalEditorDto[]>;
+  openInEditor(id: number, editor: ExternalEditorDto["id"]): Promise<void>;
+
+  /**
+   * `<img src>` için küçük resim (ya da `orig`: tam çözünürlük) adresi.
+   * `edit` > 0: düzenlenmiş sürüm (revizyon adreste, önbellek bozulmaz).
+   */
+  thumbUrl(size: ImageSize, hash: string, edit?: number): string;
 }
 
 /** Çekirdekten gelen hata: `code` ile dallanılır, `message` kullanıcıya gösterilir. */
@@ -246,7 +265,14 @@ export const tauriBackend: Backend = {
   verifyRuns: (limit) => call("verify_runs", { limit }),
   // WebKitGTK özel şemayı olduğu gibi yükler (Windows biçimi thumb.localhost
   // çekirdekte de çözülür, Linux hedefimiz).
-  thumbUrl: (size, hash) => `thumb://${size}/${hash}`,
+  editState: (id) => call("get_edit", { id }),
+  saveEdit: (id, recipe) => call("save_edit", { id, recipe }),
+  revertEdit: (id) => call("revert_edit", { id }),
+  autoTone: (id) => call("auto_tone", { id }),
+  exportEdit: (id) => call("export_edit", { id }),
+  externalEditors: () => call("external_editors"),
+  openInEditor: (id, editor) => call("open_in_editor", { id, editor }),
+  thumbUrl: (size, hash, edit) => `thumb://${size}/${hash}${edit ? `?e=${edit}` : ""}`,
 };
 
 export function createBackend(): Backend {

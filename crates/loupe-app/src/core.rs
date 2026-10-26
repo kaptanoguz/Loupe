@@ -90,6 +90,7 @@ pub struct AppCore {
     thumbs: ThumbCache,
     protocol: ThumbProtocol,
     full: FullRes,
+    editor: crate::edit::Editor,
     ai: AiRuntime,
     models: crate::models::Models,
     search: loupe_search::SearchEngine,
@@ -141,6 +142,8 @@ impl AppCore {
         });
 
         let full = FullRes::new(pool.clone(), libraries.clone(), cfg.full_dir());
+        let editor =
+            crate::edit::Editor::new(pool.clone(), libraries.clone(), queue.clone(), thumbs.clone(), cfg.edits_dir());
         let ai = AiRuntime::open(cfg.ai.clone());
         let models = crate::models::Models::new(cfg.data_dir.join("models"))?;
         let search = match &ai.engine {
@@ -157,6 +160,7 @@ impl AppCore {
             thumbs,
             protocol,
             full,
+            editor,
             ai,
             models,
             search,
@@ -317,8 +321,23 @@ impl AppCore {
 
     /// `thumb://sm/<blake3>` isteği: önbellekteki baytlar, JSON/base64 yok.
     /// `thumb://orig/<blake3>`: Loupe 1:1 için tam çözünürlük ([`crate::full`]).
+    /// `?e=<revizyon>`: düzenlenmiş sürüm ([`crate::edit`]); düzenleme geri
+    /// alındıysa düzenlenmemiş görüntü verilir.
     pub fn handle_thumb<B>(&self, req: &Request<B>) -> Response<Cow<'static, [u8]>> {
-        match full::parse(req.uri()) {
+        let orig = full::parse(req.uri());
+        if let Some(rev) = crate::edit::requested_revision(req.uri()) {
+            let target = match (orig, ThumbProtocol::parse(req.uri())) {
+                (Some(hash), _) => Some((hash, crate::edit::Target::Orig)),
+                (None, Some((size, hash))) => Some((hash, crate::edit::Target::Thumb(size))),
+                (None, None) => None,
+            };
+            if let Some((hash, target)) = target
+                && let Some(resp) = self.editor.handle(req, &hash, target, rev)
+            {
+                return resp;
+            }
+        }
+        match orig {
             Some(hash) => self.full.handle(req, &hash),
             None => self.protocol.handle(req),
         }
@@ -382,6 +401,42 @@ impl AppCore {
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_else(|| path.clone());
         reveal_path(&path, &dir)?;
         Ok(dir.to_string_lossy().into_owned())
+    }
+
+    // ───────────────────────────── Düzenleme ─────────────────────────────
+
+    pub fn edit_state(&self, id: i64) -> AppResult<crate::edit::EditStateDto> {
+        self.editor.get(id)
+    }
+
+    pub fn save_edit(&self, id: i64, recipe: loupe_media::edit::Recipe) -> AppResult<crate::edit::EditStateDto> {
+        self.editor.save(id, recipe)
+    }
+
+    pub fn revert_edit(&self, id: i64) -> AppResult<crate::edit::EditStateDto> {
+        self.editor.revert(id)
+    }
+
+    pub fn auto_tone(&self, id: i64) -> AppResult<loupe_media::edit::AutoTone> {
+        self.editor.auto(id)
+    }
+
+    pub fn export_edit(&self, id: i64, dest: &Path, quality: u8) -> AppResult<crate::edit::ExportDto> {
+        self.editor.export(id, dest, quality)
+    }
+
+    /// Kaydetme penceresinin önerisi: orijinalin klasörü ve dosya adı.
+    pub fn export_suggestion(&self, id: i64) -> AppResult<(Option<PathBuf>, String)> {
+        self.editor.export_suggestion(id)
+    }
+
+    #[must_use]
+    pub fn external_editors(&self) -> Vec<crate::edit::ExternalEditorDto> {
+        crate::edit::Editor::external_editors()
+    }
+
+    pub fn open_in_editor(&self, id: i64, editor: &str) -> AppResult<()> {
+        self.editor.open_in(id, editor)
     }
 
     /// Medyanın diskteki yolu (kütüphanesi bağlı olmalı).

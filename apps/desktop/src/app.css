@@ -316,6 +316,42 @@
     color: var(--color-ink-3);
   }
 
+  /* Kaydırıcı (düzenleme): 1px iz, 10px kare tutamak; sıfır noktası yok, değer yanında monospace */
+  .slider {
+    appearance: none;
+    height: 16px;
+    background: transparent;
+  }
+  .slider::-webkit-slider-runnable-track {
+    height: 1px;
+    background: var(--color-line-strong);
+  }
+  .slider::-webkit-slider-thumb {
+    appearance: none;
+    width: 10px;
+    height: 10px;
+    margin-top: -5px;
+    border: 1px solid var(--color-canvas);
+    background: var(--color-ink);
+  }
+  .slider:focus-visible {
+    outline: none;
+  }
+  .slider:focus-visible::-webkit-slider-thumb {
+    background: var(--color-amber);
+  }
+  .slider::-moz-range-track {
+    height: 1px;
+    background: var(--color-line-strong);
+  }
+  .slider::-moz-range-thumb {
+    width: 10px;
+    height: 10px;
+    border: 1px solid var(--color-canvas);
+    border-radius: 0;
+    background: var(--color-ink);
+  }
+
   /* Küçük resim hücresi: sanal kaydırma tarafından mutlak konumlandırılır */
   .tile {
     position: absolute;

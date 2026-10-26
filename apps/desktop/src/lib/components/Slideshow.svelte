@@ -25,7 +25,7 @@
 
   const show = $derived(catalog.slideshow);
   const item = $derived(catalog.selectedItem);
-  const src = $derived(item ? catalog.backend.thumbUrl("lg", item.hash) : "");
+  const src = $derived(item ? catalog.backend.thumbUrl("lg", item.hash, item.edit) : "");
 
   // Süre dolunca sonraki; elle geçişte ya da duraklatınca sayaç baştan kurulur.
   $effect(() => {
@@ -41,7 +41,7 @@
     const s = show;
     if (!s) return;
     const next = catalog.items[s.order[(s.pos + 1) % s.order.length] ?? -1];
-    if (next) new Image().src = catalog.backend.thumbUrl("lg", next.hash);
+    if (next) new Image().src = catalog.backend.thumbUrl("lg", next.hash, next.edit);
   });
 
   let active = $state(true);

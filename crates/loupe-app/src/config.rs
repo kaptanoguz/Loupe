@@ -86,6 +86,12 @@ impl AppConfig {
         self.cache_dir.join("full")
     }
 
+    /// Düzenlenmiş görüntülerin önbelleği (`thumb://…?e=<rev>`).
+    #[must_use]
+    pub fn edits_dir(&self) -> PathBuf {
+        self.cache_dir.join("edits")
+    }
+
     #[must_use]
     pub fn lan_identity_path(&self) -> PathBuf {
         self.data_dir.join("lan").join("identity.json")

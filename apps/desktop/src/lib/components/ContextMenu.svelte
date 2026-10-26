@@ -1,5 +1,6 @@
 <script lang="ts">
   import BookmarkPlus from "@lucide/svelte/icons/bookmark-plus";
+  import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import Heart from "@lucide/svelte/icons/heart";
@@ -76,10 +77,18 @@
           : []),
       ],
       [
+        ...(it.video ? [] : [{ label: t("menu.edit"), key: "E", icon: SlidersHorizontal, run: () => catalog.openEditor() }]),
         { label: t("menu.reveal"), icon: FolderOpen, run: () => catalog.reveal(it.id) },
         it.video
           ? { label: t("menu.play"), icon: Play, run: () => catalog.openExternal(it.id) }
           : { label: t("menu.openDefault"), icon: ExternalLink, run: () => catalog.openExternal(it.id) },
+        ...(it.video
+          ? []
+          : catalog.editors.map((ed) => ({
+              label: t("edit.openIn", { name: ed.name }),
+              icon: ExternalLink,
+              run: () => catalog.openIn(it.id, ed),
+            }))),
       ],
       [
         {

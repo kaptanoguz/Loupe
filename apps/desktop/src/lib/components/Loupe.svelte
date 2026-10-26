@@ -19,12 +19,12 @@
     if (item) void catalog.openExternal(item.id);
   }
   // Izgarada zaten yüklenmiş küçük boyut anında görünür; lg gelince üstüne geçer.
-  const low = $derived(item ? catalog.backend.thumbUrl("sm", item.hash) : "");
-  const highBase = $derived(item ? catalog.backend.thumbUrl("lg", item.hash) : "");
+  const low = $derived(item ? catalog.backend.thumbUrl("sm", item.hash, item.edit) : "");
+  const highBase = $derived(item ? catalog.backend.thumbUrl("lg", item.hash, item.edit) : "");
   // lg henüz üretilmediyse (404) çekirdek onu öne alır; kısa aralıkla yeniden denenir.
   let attempt = $state(0);
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
-  const high = $derived(attempt > 0 && highBase ? `${highBase}?r=${attempt}` : highBase);
+  const high = $derived(attempt > 0 && highBase ? `${highBase}${highBase.includes("?") ? "&" : "?"}r=${attempt}` : highBase);
 
   function onerror(): void {
     if (attempt >= THUMB_RETRIES) return;
@@ -46,7 +46,9 @@
   let drag: { x: number; y: number; px: number; py: number; moved: boolean } | null = null;
 
   const dpr = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
-  const full = $derived(orig && orig.id === item?.id ? orig : null);
+  // Düzenleme kaydedilince adres (revizyon) değişir; eski tam çözünürlük kullanılmaz.
+  const origUrl = $derived(item ? catalog.backend.thumbUrl("orig", item.hash, item.edit) : "");
+  const full = $derived(orig && orig.id === item?.id && orig.src === origUrl ? orig : null);
   /** 1:1 = görüntünün her pikseli bir ekran pikseli (tam çözünürlük geldiyse onun). */
   const actual = $derived(full ? { w: full.w / dpr, h: full.h / dpr } : { w: natural.w / dpr, h: natural.h / dpr });
   const fitScale = $derived(
@@ -67,8 +69,8 @@
 
   $effect(() => {
     const it = item;
-    if (!catalog.loupeActual || !it || natural.w === 0 || (orig && orig.id === it.id)) return;
-    const src = catalog.backend.thumbUrl("orig", it.hash);
+    const src = origUrl;
+    if (!catalog.loupeActual || !it || natural.w === 0 || (orig && orig.id === it.id && orig.src === src)) return;
     const img = new Image();
     img.decoding = "async";
     img.onload = () => {

@@ -176,6 +176,8 @@ pub struct TileItem {
     pub sync: &'static str,
     pub taken_at_utc: i64,
     pub tz_offset_min: Option<i32>,
+    /// Düzenleme revizyonu (`thumb://…?e=`); düzenlenmemişse 0.
+    pub edit: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -442,7 +444,7 @@ fn sections(conn: &Connection, p: &Plan) -> AppResult<Vec<Section>> {
     Ok(out)
 }
 
-fn aspect(w: Option<i64>, h: Option<i64>, orientation: Option<i64>) -> f32 {
+pub(crate) fn aspect(w: Option<i64>, h: Option<i64>, orientation: Option<i64>) -> f32 {
     match (w, h) {
         (Some(w), Some(h)) if w > 0 && h > 0 => {
             // EXIF 5–8: 90° döndürülmüş; genişlik ve yükseklik yer değiştirir.
@@ -461,7 +463,17 @@ const ITEM_COLS: &str = "m.id, m.blake3, m.width, m.height, m.orientation, m.rat
                  WHEN sum(s.state <> 'synced') = 0 THEN 'synced'
                  ELSE 'queued' END
        FROM sync_status s WHERE s.media_id = m.id),
-    m.duration_ms";
+    m.duration_ms,
+    (SELECT v.revision FROM versions v WHERE v.media_id = m.id AND v.is_current = 1
+        AND EXISTS (SELECT 1 FROM edits e WHERE e.version_id = v.id AND e.is_enabled = 1)),
+    (SELECT json_group_array(json_array(e.op, json(e.params))) FROM versions v JOIN edits e ON e.version_id = v.id
+      WHERE v.media_id = m.id AND v.is_current = 1 AND e.is_enabled = 1 AND e.op IN ('rotate','crop'))";
+
+/// Düzenlenmiş en/boy oranı: yalnızca döndürme ve kırpma satırları gerekir.
+fn edited_aspect(base: f32, geometry: Option<&str>) -> f32 {
+    let ops: Vec<(String, serde_json::Value)> = geometry.and_then(|g| serde_json::from_str(g).ok()).unwrap_or_default();
+    loupe_media::edit::Recipe::from_ops(ops.iter().map(|(o, p)| (o.as_str(), p))).aspect(base)
+}
 
 fn items(conn: &Connection, p: &Plan, offset: u32, limit: u32) -> AppResult<Vec<TileItem>> {
     let n = p.params.len();
@@ -476,10 +488,13 @@ fn items(conn: &Connection, p: &Plan, offset: u32, limit: u32) -> AppResult<Vec<
         let raw: Option<String> = r.get(10)?;
         let lib_state: Option<String> = r.get(13)?;
         let sync: String = r.get(14)?;
+        let edit: Option<i64> = r.get(16)?;
+        let base = aspect(r.get(2)?, r.get(3)?, r.get(4)?);
         Ok(TileItem {
             id: r.get(0)?,
             hash: blake.iter().map(|b| format!("{b:02x}")).collect(),
-            aspect: aspect(r.get(2)?, r.get(3)?, r.get(4)?),
+            aspect: if edit.is_some() { edited_aspect(base, r.get::<_, Option<String>>(17)?.as_deref()) } else { base },
+            edit: edit.unwrap_or(0),
             rating: r.get(5)?,
             label: r.get(6)?,
             favorite: r.get(7)?,
