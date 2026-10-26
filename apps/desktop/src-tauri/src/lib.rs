@@ -12,10 +12,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use loupe_app::{
-    AiStatusDto, AppConfig, AppCore, AppError, AppResult, CloudSettingsDto, CloudTargetInput, CloudTargetStatusDto,
-    CullRequest, CullResult, DeviceDto, EncryptionDto, EventCard, FaceRef, ImportRequest, ImportSessionDto,
-    InspectorDetail, LibraryDto, ModelsDto, PairingQrDto, PaletteRequest, PaletteResult, PeopleDto, RecoveryDraftDto,
-    SidebarDto, SmartAlbumDto, StatusDto, TimelineRequest, TimelineSlice, VerifyRunDto,
+    AiStatusDto, AppConfig, AppCore, AppError, AppResult, AutoTone, CloudSettingsDto, CloudTargetInput,
+    CloudTargetStatusDto, CullRequest, CullResult, DeviceDto, EditRecipe, EditStateDto, EncryptionDto, EventCard,
+    ExportDto, ExternalEditorDto, FaceRef, ImportRequest, ImportSessionDto, InspectorDetail, LibraryDto, ModelsDto,
+    PairingQrDto, PaletteRequest, PaletteResult, PeopleDto, RecoveryDraftDto, SidebarDto, SmartAlbumDto, StatusDto,
+    TimelineRequest, TimelineSlice, VerifyRunDto,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, Runtime, State};
@@ -151,6 +152,67 @@ async fn open_media(state: State<'_, Desktop>, id: i64) -> Cmd<()> {
 #[tauri::command]
 async fn reveal_media(state: State<'_, Desktop>, id: i64) -> Cmd<String> {
     blocking(&state, move |c| c.reveal_media(id)).await
+}
+
+#[tauri::command]
+async fn get_edit(state: State<'_, Desktop>, id: i64) -> Cmd<EditStateDto> {
+    blocking(&state, move |c| c.edit_state(id)).await
+}
+
+/// Düzenleme tarifini kaydeder; orijinal dosyaya dokunulmaz.
+#[tauri::command]
+async fn save_edit(state: State<'_, Desktop>, id: i64, recipe: EditRecipe) -> Cmd<EditStateDto> {
+    blocking(&state, move |c| c.save_edit(id, recipe)).await
+}
+
+#[tauri::command]
+async fn revert_edit(state: State<'_, Desktop>, id: i64) -> Cmd<EditStateDto> {
+    blocking(&state, move |c| c.revert_edit(id)).await
+}
+
+#[tauri::command]
+async fn auto_tone(state: State<'_, Desktop>, id: i64) -> Cmd<AutoTone> {
+    blocking(&state, move |c| c.auto_tone(id)).await
+}
+
+/// Kaydetme penceresi (orijinalin klasörü, `<ad>-edit.jpg`) ve JPEG dışa
+/// aktarma. Vazgeçilirse `null`.
+#[tauri::command]
+async fn export_edit<R: Runtime>(
+    app: tauri::AppHandle<R>,
+    state: State<'_, Desktop>,
+    id: i64,
+) -> Cmd<Option<ExportDto>> {
+    let (dir, name) = blocking(&state, move |c| c.export_suggestion(id)).await?;
+    let handle = app.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        let mut d = handle
+            .dialog()
+            .file()
+            .set_title("JPEG olarak dışa aktar")
+            .set_file_name(name)
+            .add_filter("JPEG", &["jpg", "jpeg"]);
+        if let Some(dir) = dir {
+            d = d.set_directory(dir);
+        }
+        d.blocking_save_file()
+    })
+    .await
+    .map_err(|e| AppError::Join(e.to_string()))?;
+    let Some(path) = picked else { return Ok(None) };
+    let path = path.into_path().map_err(|e| AppError::Invalid(e.to_string()))?;
+    blocking(&state, move |c| c.export_edit(id, &path, loupe_app::edit::EXPORT_QUALITY)).await.map(Some)
+}
+
+#[tauri::command]
+async fn external_editors(state: State<'_, Desktop>) -> Cmd<Vec<ExternalEditorDto>> {
+    blocking(&state, |c| Ok(c.external_editors())).await
+}
+
+/// Orijinal dosyayı Darktable ya da GIMP'te açar.
+#[tauri::command]
+async fn open_in_editor(state: State<'_, Desktop>, id: i64, editor: String) -> Cmd<()> {
+    blocking(&state, move |c| c.open_in_editor(id, &editor)).await
 }
 
 /// Seçili fotoğrafları Çöp Kutusu'na taşır (arayüz önce onay ister).
@@ -541,6 +603,13 @@ pub fn wire<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             open_media,
             reveal_media,
             trash_media,
+            get_edit,
+            save_edit,
+            revert_edit,
+            auto_tone,
+            export_edit,
+            external_editors,
+            open_in_editor,
             list_libraries,
             refresh_libraries,
             start_import,

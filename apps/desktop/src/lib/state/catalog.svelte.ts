@@ -8,6 +8,8 @@ import type { Backend } from "../api/backend";
 import type {
   Arrange,
   CullRequest,
+  EditStateDto,
+  ExternalEditorDto,
   Grouping,
   InspectorDetail,
   Section,
@@ -125,6 +127,10 @@ export class Catalog {
   inspectorOpen = $state(true);
   loupeOpen = $state(false);
   loupeActual = $state(false);
+  /** Düzenleme ekranı seçili fotoğraf için açık. */
+  editorOpen = $state(false);
+  /** Kurulu dış düzenleyiciler (Darktable, GIMP); ilk istekte yüklenir. */
+  editors = $state.raw<ExternalEditorDto[]>([]);
   zoom = $state<ZoomLevel>(DEFAULT_ZOOM);
   detail = $state.raw<InspectorDetail | null>(null);
   sidebar = $state.raw<SidebarDto | null>(null);
@@ -370,6 +376,9 @@ export class Catalog {
       case "slideshow":
         this.startSlideshow();
         return true;
+      case "edit":
+        this.openEditor();
+        return true;
       case "rate":
       case "label": {
         const it = this.selectedItem;
@@ -467,6 +476,51 @@ export class Catalog {
   async openExternal(id: number): Promise<void> {
     try {
       await this.backend.openMedia(id);
+    } catch (e) {
+      this.fail(e);
+    }
+  }
+
+  /** Seçili fotoğrafı düzenleme ekranında açar (videolar düzenlenmez). */
+  openEditor(): void {
+    const it = this.selectedItem;
+    if (!it) return;
+    this.menu = null;
+    if (it.video) {
+      this.flash(t("edit.noVideo"));
+      return;
+    }
+    this.editorOpen = true;
+  }
+
+  /** Kaydedilen (ya da geri alınan) düzenleme ızgaraya ve Loupe'a yansır. */
+  applyEdit(s: EditStateDto): void {
+    const k = this.items.findIndex((it) => it?.id === s.id);
+    const it = this.items[k];
+    if (!it) return;
+    it.edit = s.revision;
+    if (Math.abs(it.aspect - s.aspect) > 1e-4) {
+      it.aspect = s.aspect;
+      this.aspects[k] = s.aspect;
+      this.aspectsRev++;
+    }
+    this.rev++;
+  }
+
+  async loadEditors(): Promise<void> {
+    try {
+      this.editors = await this.backend.externalEditors();
+    } catch {
+      // Bulunamazsa menüde dış düzenleyici gösterilmez.
+      this.editors = [];
+    }
+  }
+
+  /** Orijinal dosyayı Darktable / GIMP'te açar. */
+  async openIn(id: number, editor: ExternalEditorDto): Promise<void> {
+    try {
+      await this.backend.openInEditor(id, editor.id);
+      this.flash(t("edit.openingIn", { name: editor.name }));
     } catch (e) {
       this.fail(e);
     }

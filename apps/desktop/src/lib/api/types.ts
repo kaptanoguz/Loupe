@@ -66,6 +66,8 @@ export interface TileItem {
   sync: SyncState;
   takenAtUtc: number;
   tzOffsetMin: number | null;
+  /** Düzenleme revizyonu (`thumb://…?e=`); düzenlenmemişse 0. */
+  edit: number;
 }
 
 export interface TimelineSlice {
@@ -579,4 +581,52 @@ export interface VerifyRunDto {
   bytesRead: number;
   startedAt: number;
   finishedAt: number | null;
+}
+
+/** Kırpma: döndürülmüş çerçeve içinde 0–1 normalleştirilmiş dikdörtgen. */
+export interface EditCrop {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Tahribatsız düzenleme tarifi (çekirdekte `loupe_media::edit::Recipe`). */
+export interface EditRecipe {
+  /** Saat yönünde 90° dönüş sayısı, 0–3. */
+  quarter: number;
+  /** Derece, −45…45. */
+  straighten: number;
+  crop: EditCrop | null;
+  /** −100…100 */
+  brightness: number;
+  contrast: number;
+  temperature: number;
+}
+
+export interface EditStateDto {
+  id: number;
+  revision: number;
+  recipe: EditRecipe;
+  aspect: number;
+  sidecar: "written" | "skipped" | "failed";
+}
+
+export interface AutoTone {
+  brightness: number;
+  contrast: number;
+  temperature: number;
+}
+
+export interface ExportDto {
+  path: string;
+  width: number;
+  height: number;
+  /** Orijinal çözülemedi; önizlemeden (1920 px) üretildi. */
+  lowRes: boolean;
+}
+
+export interface ExternalEditorDto {
+  id: "darktable" | "gimp";
+  name: string;
 }

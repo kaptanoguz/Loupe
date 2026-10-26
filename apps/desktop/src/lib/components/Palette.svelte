@@ -2,7 +2,7 @@
   import { locale, t } from "../i18n";
 
   /** Paletten çalıştırılan uygulama komutları (App yürütür). */
-  export type CommandId = "verify" | "wifi" | "iphone" | "cloud" | "settings" | "people" | "events" | "ai-pause" | "slideshow";
+  export type CommandId = "verify" | "wifi" | "iphone" | "cloud" | "settings" | "people" | "events" | "ai-pause" | "slideshow" | "edit";
 
   export interface PaletteCommand {
     id: CommandId;

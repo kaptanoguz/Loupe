@@ -20,6 +20,7 @@ const item: TileItem = {
   sync: "local",
   takenAtUtc: 0,
   tzOffsetMin: null,
+  edit: 0,
 };
 
 describe("keyToAction", () => {
@@ -78,5 +79,11 @@ describe("cullRequestFor", () => {
   });
   it("kürasyon dışı eylem istek üretmez", () => {
     expect(cullRequestFor({ type: "inspector" }, item)).toBeNull();
+  });
+
+  it("E düzenleme ekranını açar (ızgarada ve Loupe'da)", () => {
+    expect(keyToAction({ key: "e" }, grid)).toEqual({ type: "edit" });
+    expect(keyToAction({ key: "E" }, loupe)).toEqual({ type: "edit" });
+    expect(keyToAction({ key: "e", ctrlKey: true }, grid)).toBeNull();
   });
 });

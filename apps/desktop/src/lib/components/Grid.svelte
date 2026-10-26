@@ -162,7 +162,7 @@
       const old = prev.length === pool ? prev[k] : undefined;
       let src = "";
       if (item) {
-        const url = catalog.backend.thumbUrl(cls, item.hash);
+        const url = catalog.backend.thumbUrl(cls, item.hash, item.edit);
         if (old && old.idx === idx && old.src) {
           // Aynı öğe: yüklenmiş görüntü korunur; boyut sınıfı yalnızca yavaşken yükselir.
           src = fast ? old.src : url;

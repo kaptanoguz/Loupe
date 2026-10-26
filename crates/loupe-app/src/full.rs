@@ -212,7 +212,7 @@ pub fn rotate_to_jpeg(bytes: &[u8], exif_orientation: u8) -> AppResult<Vec<u8>> 
     Ok(out)
 }
 
-fn write_atomic(path: &Path, bytes: &[u8]) -> AppResult<()> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> AppResult<()> {
     let dir = path.parent().ok_or_else(|| AppError::Invalid("önbellek yolu".into()))?;
     std::fs::create_dir_all(dir).map_err(AppError::io(format!("{}", dir.display())))?;
     let tmp = dir.join(format!(".{}.{}.tmp", std::process::id(), uuid::Uuid::new_v4().simple()));

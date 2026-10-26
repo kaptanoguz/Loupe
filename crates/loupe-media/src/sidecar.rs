@@ -137,6 +137,31 @@ impl Sidecar {
         json.push(b'\n');
         write_atomic(&json_path, &json)
     }
+    /// `.loupe.json`'daki `edits` alanını yazar (`None`: siler); diğer alanlar
+    /// ve XMP'ye dokunulmaz. Düzenleme tarifi böylece katalog olmadan da okunur.
+    pub fn write_edits(&self, edits: Option<serde_json::Value>) -> Result<(), MediaError> {
+        let json_path = self.json_path();
+        if json_path == self.media {
+            return Err(MediaError::Sidecar { path: json_path, reason: "sidecar yolu orijinal dosyayla aynı".into() });
+        }
+        let existing = read_optional(&json_path)?;
+        if existing.is_none() && edits.is_none() {
+            return Ok(());
+        }
+        let mut doc = match existing {
+            Some(bytes) => serde_json::from_slice::<JsonSidecar>(&bytes)
+                .map_err(|e| MediaError::Sidecar { path: json_path.clone(), reason: e.to_string() })?,
+            None => JsonSidecar::default(),
+        };
+        doc.version = JSON_VERSION;
+        match edits {
+            Some(v) => doc.extra.insert("edits".into(), v),
+            None => doc.extra.remove("edits"),
+        };
+        let mut json = serde_json::to_vec_pretty(&doc).map_err(|e| MediaError::Encode(e.to_string()))?;
+        json.push(b'\n');
+        write_atomic(&json_path, &json)
+    }
 }
 
 fn read_optional(path: &Path) -> Result<Option<Vec<u8>>, MediaError> {
