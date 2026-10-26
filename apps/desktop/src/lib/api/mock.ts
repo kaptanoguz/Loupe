@@ -872,7 +872,7 @@ export class MockBackend implements Backend {
     ["scrfd_10g.onnx", "face_detect", 16_923_827, "InsightFace: yalnızca ticari olmayan araştırma kullanımı"],
     ["arcface_w600k_r50.onnx", "face_embed", 174_383_860, "InsightFace: yalnızca ticari olmayan araştırma kullanımı"],
     ["mclip_image.onnx", "clip_image", 351_000_000, "MIT (M-CLIP), OpenAI CLIP ViT-B/32"],
-    ["mclip_text.onnx", "clip_text", 1_120_000_000, "MIT (M-CLIP), XLM-RoBERTa"],
+    ["mclip_text/model.onnx", "clip_text", 2_241_000_000, "MIT (M-CLIP), XLM-RoBERTa"],
     ["mclip_tokenizer.json", "tokenizer", 17_082_660, "MIT"],
     ["libonnxruntime.so", "runtime", 21_042_416, "MIT"],
   ];

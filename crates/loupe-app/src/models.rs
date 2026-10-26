@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use loupe_ai::fetch::{Fetcher, InstallReport, Progress, SourceFailure};
-use loupe_ai::models::{FileState, FileStatus, Lock, Manifest, verify};
+use loupe_ai::models::{FileState, FileStatus, Lock, Manifest, external_state, verify};
 use serde::Serialize;
 
 use crate::{AppError, AppResult};
@@ -89,7 +89,7 @@ impl Models {
             let sha = exp.map(|e| loupe_ai::models::hex(&e.sha256));
             let meta = std::fs::metadata(&path).ok();
             let key = meta.as_ref().map(|m| (m.len(), m.modified().ok()));
-            let state = match (key, cache.get(&f.file)) {
+            let mut state = match (key, cache.get(&f.file)) {
                 (Some((len, mtime)), Some((l, t, s, st))) if *l == len && *t == mtime && *s == sha => *st,
                 _ => {
                     let st = verify(&path, exp)?;
@@ -99,11 +99,17 @@ impl Models {
                     st
                 }
             };
+            // Harici ağırlıklar: yoklamada yalnızca boyut (tam özet kurulumda).
+            if state == FileState::Verified
+                && let Some(s) = external_state(f, &self.dir, &lock, false)?
+            {
+                state = s;
+            }
             files.push(FileStatus {
                 file: f.file.clone(),
                 role: f.role.clone(),
                 state,
-                size: exp.map(|e| e.size),
+                size: self.manifest.file_total_size(f, &lock),
                 sha256: sha,
                 license: self.manifest.source(&f.source).and_then(|s| s.license.clone()),
             });

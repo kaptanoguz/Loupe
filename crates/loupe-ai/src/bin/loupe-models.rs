@@ -31,6 +31,7 @@ fn print_status(manifest: &Manifest, dir: &std::path::Path) -> Result<bool, loup
             FileState::Missing => "yok",
             FileState::Corrupt => "BOZUK",
             FileState::Unpinned => "özet bilinmiyor",
+            FileState::Incomplete => "AĞIRLIK EKSİK",
         };
         let size = r.size.map_or_else(|| "?".to_owned(), mb);
         println!("  {:<24} {:<11} {:>10}  {}", r.file, r.role, size, state);

@@ -387,7 +387,7 @@ export interface AiStatusDto {
   images: number;
 }
 
-export type ModelFileState = "missing" | "verified" | "corrupt" | "unpinned";
+export type ModelFileState = "missing" | "verified" | "corrupt" | "unpinned" | "incomplete";
 
 export interface ModelFileDto {
   file: string;

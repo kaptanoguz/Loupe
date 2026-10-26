@@ -9,6 +9,14 @@
 //!   Hugging Face API'sinden (LFS `oid` = içeriğin SHA-256'sı) alınır ve
 //!   `manifest.lock.json`'a yazılır. Sonraki doğrulamalar kilit dosyasına göre
 //!   yapılır. `loupe-models pin` bu değerleri manifest biçiminde yazdırır.
+//!
+//! **Harici ağırlıklı ONNX** (`external_data`): 2 GB'ı aşan modeller (M-CLIP
+//! metin kodlayıcısı) ağırlıklarını grafiğin yanındaki ayrı dosyalarda tutar.
+//! Grafik indirildikten sonra içindeki `TensorProto.external_data` konumları
+//! okunur, her biri aynı Hugging Face dizininden indirilir ve grafikle aynı alt
+//! dizine konur (ONNX Runtime konumları grafiğin dizinine göre çözer). Grafik
+//! tek başına doğrulansa bile ağırlıkların hepsi yerinde değilse model
+//! [`FileState::Incomplete`] sayılır.
 
 use std::collections::{BTreeMap, HashSet};
 use std::fs::File;
@@ -16,6 +24,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use sha1::Sha1;
 use sha2::{Digest, Sha256};
 
 use crate::AiError;
@@ -74,6 +83,10 @@ pub struct ModelFile {
     pub size: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
+    /// ONNX grafiği; ağırlıkları kaynağın Hugging Face dizinindeki ayrı
+    /// dosyalarda. Dosya bir alt dizinde olmalı (`mclip_text/model.onnx`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub external_data: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -102,6 +115,9 @@ pub enum FileState {
     Corrupt,
     /// Var; beklenen özet henüz bilinmiyor (Hugging Face'ten çözülmemiş).
     Unpinned,
+    /// Grafik doğru ama harici ağırlık dosyalarından biri eksik ya da yarım:
+    /// model yüklenemez, kurulum eksikleri indirir.
+    Incomplete,
 }
 
 /// Varsayılan model dizini: `$XDG_DATA_HOME/loupe/models` (yoksa
@@ -144,6 +160,17 @@ pub fn hex(b: &[u8]) -> String {
 /// Model dizininde yalnızca düz dosya adı (yol bileşeni, gizli dosya yok).
 fn safe_name(name: &str) -> bool {
     !name.is_empty() && !name.starts_with('.') && !name.contains(['/', '\\', '\0']) && name.len() <= 128
+}
+
+/// Model dizinine göre yol: düz ad ya da tek alt dizin (`mclip_text/model.onnx`).
+fn safe_rel(path: &str) -> bool {
+    let parts: Vec<&str> = path.split('/').collect();
+    parts.len() <= 2 && parts.iter().all(|p| safe_name(p))
+}
+
+/// `.partial/` içinde düz ad (alt dizinli model yolları için).
+fn flat(name: &str) -> String {
+    name.replace('/', "__")
 }
 
 /// İndirme adresi: https; yalnızca testlerde döngü adresine http.
@@ -189,7 +216,7 @@ impl Manifest {
         }
         let mut names = HashSet::new();
         for f in &self.files {
-            if !safe_name(&f.file) || !names.insert(f.file.as_str()) {
+            if !safe_rel(&f.file) || !names.insert(f.file.as_str()) {
                 return Err(invalid(format!("geçersiz ya da tekrar eden dosya adı: {:?}", f.file)));
             }
             let src =
@@ -210,6 +237,12 @@ impl Manifest {
                     }
                 }
                 _ => return Err(invalid(format!("{}: member yalnızca arşiv kaynağında olur", f.file))),
+            }
+            if f.external_data && (src.hf.is_none() || src.archive.is_some() || !f.file.contains('/')) {
+                return Err(invalid(format!(
+                    "{}: external_data yalnızca Hugging Face kaynağında ve alt dizindeki dosyada olur",
+                    f.file
+                )));
             }
         }
         Ok(())
@@ -242,6 +275,14 @@ impl Manifest {
             _ => self.source(&f.source).and_then(|s| self.source_expected(s, lock)),
         }
     }
+
+    /// Diskte kaplayacağı toplam boyut: grafik + bilinen harici ağırlıklar.
+    #[must_use]
+    pub fn file_total_size(&self, f: &ModelFile, lock: &Lock) -> Option<u64> {
+        let graph = self.file_expected(f, lock)?.size;
+        let ext = lock.external(&f.source).map_or(0, |m| m.values().map(|e| e.size).sum());
+        Some(graph + ext)
+    }
 }
 
 /// `manifest.lock.json`: kaynak kimliği → çözülen boyut ve SHA-256.
@@ -256,6 +297,21 @@ pub struct LockEntry {
     pub sha256: String,
     /// Çözüldüğü Hugging Face sürümü (ör. `main`).
     pub revision: String,
+    /// `external_data` grafiğinin ağırlık dosyaları (ad → içerik). `None`:
+    /// henüz çözülmedi; grafik değişince sıfırlanır.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external: Option<BTreeMap<String, ExternalEntry>>,
+}
+
+/// Harici ağırlık dosyası. Hugging Face'te büyük dosyalar LFS'tedir (özet
+/// SHA-256); küçükler düz git nesnesidir ve yalnızca git blob SHA-1'i bilinir.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalEntry {
+    pub size: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_sha1: Option<String>,
 }
 
 impl Lock {
@@ -277,6 +333,11 @@ impl Lock {
     pub fn get(&self, id: &str) -> Option<Expected> {
         let e = self.sources.get(id)?;
         Some(Expected { size: e.size, sha256: parse_hex32(&e.sha256).ok()? })
+    }
+
+    #[must_use]
+    pub fn external(&self, id: &str) -> Option<&BTreeMap<String, ExternalEntry>> {
+        self.sources.get(id)?.external.as_ref()
     }
 }
 
@@ -311,6 +372,74 @@ pub fn verify(path: &Path, expected: Option<Expected>) -> Result<FileState, AiEr
     Ok(if sha == exp.sha256 { FileState::Verified } else { FileState::Corrupt })
 }
 
+/// Git blob SHA-1'i: `sha1("blob <boyut>\0" ‖ içerik)`.
+#[must_use]
+pub fn git_blob_sha1(bytes: &[u8]) -> [u8; 20] {
+    let mut h = Sha1::new();
+    h.update(format!("blob {}\0", bytes.len()).as_bytes());
+    h.update(bytes);
+    h.finalize().into()
+}
+
+fn git_blob_sha1_file(path: &Path, size: u64) -> Result<[u8; 20], AiError> {
+    let mut f = File::open(path).map_err(io("açılamadı", path))?;
+    let mut h = Sha1::new();
+    h.update(format!("blob {size}\0").as_bytes());
+    let mut buf = vec![0u8; READ_BUF];
+    loop {
+        let r = f.read(&mut buf).map_err(io("okunamadı", path))?;
+        if r == 0 {
+            break;
+        }
+        h.update(&buf[..r]);
+    }
+    Ok(h.finalize().into())
+}
+
+/// Harici ağırlık dosyası beklenenle aynı mı. `full` değilse yalnızca boyut
+/// (arayüzün sık yoklaması); kurulum ve `verify` tam özet karşılaştırır.
+pub fn verify_external(path: &Path, e: &ExternalEntry, full: bool) -> Result<FileState, AiError> {
+    let Ok(meta) = std::fs::metadata(path) else { return Ok(FileState::Missing) };
+    if !meta.is_file() || meta.len() != e.size {
+        return Ok(FileState::Corrupt);
+    }
+    if !full {
+        return Ok(FileState::Verified);
+    }
+    let ok = match (&e.sha256, &e.git_sha1) {
+        (Some(h), _) => sha256_file(path)?.1 == parse_hex32(h)?,
+        (None, Some(h)) => hex(&git_blob_sha1_file(path, e.size)?) == h.to_ascii_lowercase(),
+        (None, None) => return Ok(FileState::Unpinned),
+    };
+    Ok(if ok { FileState::Verified } else { FileState::Corrupt })
+}
+
+/// `external_data` dosyasının ağırlıkları: dosya böyle değilse `None`; kilitte
+/// çözülmemişse ya da biri eksik, yarım veya bozuksa `Incomplete`.
+pub fn external_state(f: &ModelFile, dir: &Path, lock: &Lock, full: bool) -> Result<Option<FileState>, AiError> {
+    if !f.external_data {
+        return Ok(None);
+    }
+    let Some(map) = lock.external(&f.source) else { return Ok(Some(FileState::Incomplete)) };
+    let base = dir.join(&f.file);
+    let base = base.parent().unwrap_or(dir);
+    for (name, e) in map {
+        if verify_external(&base.join(name), e, full)? != FileState::Verified {
+            return Ok(Some(FileState::Incomplete));
+        }
+    }
+    Ok(Some(FileState::Verified))
+}
+
+/// Dosyanın tam durumu: SHA-256 ve (varsa) harici ağırlıkların hepsi.
+pub fn file_state(manifest: &Manifest, f: &ModelFile, dir: &Path, lock: &Lock) -> Result<FileState, AiError> {
+    let state = verify(&dir.join(&f.file), manifest.file_expected(f, lock))?;
+    if state != FileState::Verified {
+        return Ok(state);
+    }
+    Ok(external_state(f, dir, lock, true)?.unwrap_or(state))
+}
+
 /// Bir model dosyasının durumu (arayüz ve `loupe-models status`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -335,8 +464,8 @@ pub fn status(manifest: &Manifest, dir: &Path) -> Result<Vec<FileStatus>, AiErro
             Ok(FileStatus {
                 file: f.file.clone(),
                 role: f.role.clone(),
-                state: verify(&dir.join(&f.file), exp)?,
-                size: exp.map(|e| e.size),
+                state: file_state(manifest, f, dir, &lock)?,
+                size: manifest.file_total_size(f, &lock),
                 sha256: exp.map(|e| hex(&e.sha256)),
                 license: manifest.source(&f.source).and_then(|s| s.license.clone()),
             })
@@ -347,7 +476,7 @@ pub fn status(manifest: &Manifest, dir: &Path) -> Result<Vec<FileStatus>, AiErro
 /// `dir/.partial/<ad>.tmp`'ye yazar, fsync eder, `dir/<ad>` üzerine `rename`
 /// eder ve dizini fsync eder: yarım dosya hiçbir zaman asıl adla görünmez.
 pub fn write_atomic(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), AiError> {
-    let tmp = partial_dir(dir)?.join(format!("{name}.tmp"));
+    let tmp = partial_dir(dir)?.join(format!("{}.tmp", flat(name)));
     let mut f = File::create(&tmp).map_err(io("yazılamadı", &tmp))?;
     f.write_all(bytes).map_err(io("yazılamadı", &tmp))?;
     f.sync_all().map_err(io("fsync", &tmp))?;
@@ -361,11 +490,95 @@ pub fn partial_dir(dir: &Path) -> Result<PathBuf, AiError> {
     Ok(p)
 }
 
-/// Doğrulanmış geçici dosyayı yerine koyar.
+/// Doğrulanmış geçici dosyayı yerine koyar (`name` alt dizinli olabilir).
 pub fn commit(dir: &Path, tmp: &Path, name: &str) -> Result<(), AiError> {
     let dst = dir.join(name);
+    let parent = dst.parent().unwrap_or(dir);
+    std::fs::create_dir_all(parent).map_err(io("dizin oluşturulamadı", parent))?;
     std::fs::rename(tmp, &dst).map_err(io("yerine konamadı", &dst))?;
-    File::open(dir).and_then(|d| d.sync_all()).map_err(io("dizin fsync", dir))
+    File::open(parent).and_then(|d| d.sync_all()).map_err(io("dizin fsync", parent))
+}
+
+/// `.partial/` içinde bu model dosyası için geçici ad.
+pub fn partial_path(dir: &Path, name: &str, ext: &str) -> Result<PathBuf, AiError> {
+    Ok(partial_dir(dir)?.join(format!("{}.{ext}", flat(name))))
+}
+
+/// Harici ağırlık taşıyan grafik en çok bu kadar olur (ağırlıklar dışarıda).
+const MAX_GRAPH_BYTES: u64 = 256 << 20;
+
+/// ONNX grafiğinin (`ModelProto`) başlatıcılarındaki harici veri konumları,
+/// ilk görülme sırasıyla. Yalnızca protobuf'un ihtiyaç duyulan alanları okunur:
+/// `ModelProto.graph` (7) → `GraphProto.initializer` (5) →
+/// `TensorProto.external_data` (13) → `StringStringEntryProto` (1 = key, 2 = value).
+pub fn onnx_external_locations(path: &Path) -> Result<Vec<String>, AiError> {
+    let len = std::fs::metadata(path).map_err(io("okunamadı", path))?.len();
+    if len > MAX_GRAPH_BYTES {
+        return Err(invalid(format!("{}: harici ağırlıklı grafik için fazla büyük", path.display())));
+    }
+    let bytes = std::fs::read(path).map_err(io("okunamadı", path))?;
+    let mut out: Vec<String> = Vec::new();
+    for graph in pb_fields(&bytes, 7)? {
+        for tensor in pb_fields(graph, 5)? {
+            for entry in pb_fields(tensor, 13)? {
+                let key = pb_fields(entry, 1)?;
+                if key.first().copied() != Some(b"location".as_slice()) {
+                    continue;
+                }
+                let Some(value) = pb_fields(entry, 2)?.into_iter().next() else { continue };
+                let loc = std::str::from_utf8(value).map_err(|_| invalid("onnx: konum UTF-8 değil"))?;
+                if !safe_name(loc) {
+                    return Err(invalid(format!("onnx: güvensiz harici veri konumu {loc:?}")));
+                }
+                if !out.iter().any(|o| o == loc) {
+                    out.push(loc.to_owned());
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn pb_varint(b: &[u8], p: &mut usize) -> Result<u64, AiError> {
+    let mut v = 0u64;
+    for shift in (0..64).step_by(7) {
+        let byte = *b.get(*p).ok_or_else(|| invalid("onnx: kesik varint"))?;
+        *p += 1;
+        v |= u64::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            return Ok(v);
+        }
+    }
+    Err(invalid("onnx: bozuk varint"))
+}
+
+/// Mesajdaki `field` numaralı uzunluk-önekli alanların gövdeleri.
+fn pb_fields(b: &[u8], field: u64) -> Result<Vec<&[u8]>, AiError> {
+    let mut out = Vec::new();
+    let mut p = 0usize;
+    while p < b.len() {
+        let tag = pb_varint(b, &mut p)?;
+        match tag & 7 {
+            0 => {
+                pb_varint(b, &mut p)?;
+            }
+            1 => p += 8,
+            2 => {
+                let n = usize::try_from(pb_varint(b, &mut p)?).map_err(|_| invalid("onnx: bozuk uzunluk"))?;
+                let end = p.checked_add(n).filter(|&e| e <= b.len()).ok_or_else(|| invalid("onnx: kesik alan"))?;
+                if tag >> 3 == field {
+                    out.push(&b[p..end]);
+                }
+                p = end;
+            }
+            5 => p += 4,
+            w => return Err(invalid(format!("onnx: desteklenmeyen protobuf tel türü {w}"))),
+        }
+    }
+    if p > b.len() {
+        return Err(invalid("onnx: kesik mesaj"));
+    }
+    Ok(out)
 }
 
 /// Arşivden tek üyeyi `out`'a çıkarır; yazarken SHA-256 hesaplar ve beklenenle

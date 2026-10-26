@@ -55,7 +55,7 @@
       "sha256": "4c06341c33c2ca1f86781dab0e829f88ad5b64be9fba56e56bc9ebdefc619e43"
     },
     { "file": "mclip_image.onnx", "role": "clip_image", "dim": 512, "source": "mclip-visual" },
-    { "file": "mclip_text.onnx", "role": "clip_text", "dim": 512, "source": "mclip-textual" },
+    { "file": "mclip_text/model.onnx", "role": "clip_text", "dim": 512, "source": "mclip-textual", "external_data": true },
     { "file": "mclip_tokenizer.json", "role": "tokenizer", "source": "mclip-tokenizer" },
     {
       "file": "libonnxruntime.so",
