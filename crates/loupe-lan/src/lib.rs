@@ -14,6 +14,7 @@
 //! - [`telemetry`]: bayt/sn, ETA ve doğrulanan dosya sayısı yayını.
 //! - [`server`]: HTTP/2 + TLS 1.3 sunucusu ve uç noktaları.
 //! - [`web`]: kurulum gerektirmeyen telefon sayfası ve tarayıcı oturumu (RFC-001G).
+//! - [`webca`]: telefona profil olarak kurulan ad kısıtlı CA (Kestirmeler, Safari).
 
 pub mod clock;
 pub mod conflict;
@@ -27,6 +28,7 @@ pub mod telemetry;
 pub mod tls;
 pub mod tus;
 pub mod web;
+pub mod webca;
 
 pub use clock::{Clock, ManualClock, SystemClock};
 pub use conflict::{Classification, ConflictPolicy, Decision, Resolution, UploadKind};
@@ -37,6 +39,7 @@ pub use pairing::{PAIRING_TTL, PairingManager, PairingPayload, PairingToken};
 pub use server::{AutoApprove, LanConfig, LanServer, PairingApprover, PairingRequestInfo};
 pub use telemetry::{SyncStatus, Telemetry};
 pub use tls::{DeviceRegistry, ServerPin, client_config, server_config};
+pub use webca::{WebCa, WebCaPem, WebLeaf};
 
 /// Tek bir PATCH isteğinin en büyük gövdesi (RFC-001B §2.6: 8 MiB parça).
 pub const MAX_PATCH_BYTES: u64 = 8 * 1024 * 1024;

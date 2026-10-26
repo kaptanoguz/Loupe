@@ -67,20 +67,70 @@ impl View {
 /// Alaka sırasıyla tek bölümün başlığı.
 pub const RANKED_TITLE: &str = "En alakalı";
 
+/// Tarih sıralamalarında bölümleme. Ad, boyut ve puan sıralamaları kendi
+/// bölümlerini kurar; `None` tek bölümdür.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Grouping {
     #[default]
     Day,
     Month,
+    Year,
+    None,
+}
+
+/// Fotoğraf görünümlerinin sıralama anahtarı.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SortKey {
+    /// Çekim tarihi.
+    #[default]
+    Taken,
+    /// Kataloğa eklenme tarihi.
+    Added,
+    /// Özgün dosya adı.
+    Name,
+    /// Dosya boyutu.
+    Size,
+    /// Puan (aynı puanlar çekim tarihine göre).
+    Rating,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SortDir {
+    #[default]
+    Desc,
+    Asc,
+}
+
+impl SortDir {
+    const fn sql(self) -> &'static str {
+        match self {
+            Self::Desc => "DESC",
+            Self::Asc => "ASC",
+        }
+    }
+}
+
+/// Görünümün dizilişi: sıralama, yön ve bölümleme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Arrange {
+    #[serde(default)]
+    pub sort: SortKey,
+    #[serde(default)]
+    pub dir: SortDir,
+    #[serde(default)]
+    pub grouping: Grouping,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TimelineRequest {
     pub view: View,
-    #[serde(default)]
-    pub grouping: Grouping,
+    #[serde(flatten)]
+    pub arrange: Arrange,
     #[serde(default)]
     pub offset: u32,
     pub limit: u32,
@@ -130,6 +180,8 @@ pub struct TimelineSlice {
 }
 
 const LOCAL_SECONDS: &str = "(m.taken_at_utc + COALESCE(m.tz_offset_min, 0) * 60000) / 1000";
+/// Eklenme anı UTC ms; bölüm bu makinenin saat dilimiyle.
+const ADDED_SECONDS: &str = "m.imported_at / 1000";
 
 /// Görünümün SQL gövdesi: ek JOIN'ler, WHERE, bölüm anahtarı ve sıralama.
 struct Plan {
@@ -141,21 +193,51 @@ struct Plan {
     title: String,
     subtitle: String,
     order: String,
+    /// Anahtar bir tarih (`2026-10-24`, `2026-10`, `2026`); başlık ondan üretilir.
+    dated: bool,
 }
 
-fn plan(conn: &Connection, view: &View, grouping: Grouping, ranked: Option<&[i64]>) -> AppResult<Plan> {
-    let date_key = match grouping {
-        Grouping::Day => format!("strftime('%Y-%m-%d', {LOCAL_SECONDS}, 'unixepoch')"),
-        Grouping::Month => format!("strftime('%Y-%m', {LOCAL_SECONDS}, 'unixepoch')"),
+/// Sıralamaya göre bölüm anahtarı, başlık sütunu, tarih mi ve ORDER BY.
+fn arrangement(a: Arrange) -> (String, String, bool, String) {
+    let dir = a.dir.sql();
+    let date_key = |secs: &str, modifier: &str| {
+        let fmt = match a.grouping {
+            Grouping::Day => "%Y-%m-%d",
+            Grouping::Month => "%Y-%m",
+            Grouping::Year => "%Y",
+            Grouping::None => return ("'all'".to_owned(), "'Tümü'".to_owned(), false),
+        };
+        (format!("strftime('{fmt}', {secs}, 'unixepoch'{modifier})"), "NULL".to_owned(), true)
     };
+    let single = |title: &str| ("'all'".to_owned(), format!("'{title}'"), false);
+    let ((key, title, dated), order) = match a.sort {
+        SortKey::Taken => (date_key(LOCAL_SECONDS, ""), format!("m.taken_at_utc {dir}, m.id {dir}")),
+        SortKey::Added => (date_key(ADDED_SECONDS, ", 'localtime'"), format!("m.imported_at {dir}, m.id {dir}")),
+        SortKey::Name => (single("Ada göre"), format!("m.original_filename COLLATE NOCASE {dir}, m.id {dir}")),
+        SortKey::Size => (single("Boyuta göre"), format!("m.size_bytes {dir}, m.id {dir}")),
+        SortKey::Rating => (
+            (
+                "'r' || m.rating".to_owned(),
+                "CASE m.rating WHEN 0 THEN 'Puansız' ELSE m.rating || ' yıldız' END".to_owned(),
+                false,
+            ),
+            format!("m.rating {dir}, m.taken_at_utc DESC, m.id DESC"),
+        ),
+    };
+    (key, title, dated, order)
+}
+
+fn plan(conn: &Connection, view: &View, arrange: Arrange, ranked: Option<&[i64]>) -> AppResult<Plan> {
+    let (key, title, dated, order) = arrangement(arrange);
     let by_date = |where_sql: String, params: Vec<Value>| Plan {
         joins: String::new(),
         where_sql,
         params,
-        key: date_key.clone(),
-        title: "NULL".into(),
+        key: key.clone(),
+        title: title.clone(),
         subtitle: "NULL".into(),
-        order: "m.taken_at_utc DESC, m.id DESC".into(),
+        order: order.clone(),
+        dated,
     };
     let base = "m.soft_deleted_at IS NULL".to_owned();
     if let Some(ids) = ranked {
@@ -168,6 +250,7 @@ fn plan(conn: &Connection, view: &View, grouping: Grouping, ranked: Option<&[i64
             title: format!("'{RANKED_TITLE}'"),
             subtitle: "NULL".into(),
             order: "r.key".into(),
+            dated: false,
         });
     }
     Ok(match view {
@@ -196,16 +279,26 @@ fn plan(conn: &Connection, view: &View, grouping: Grouping, ranked: Option<&[i64
             ),
             vec![Value::Integer(*id)],
         ),
-        View::Event { id } => Plan {
-            joins: "JOIN event_media em ON em.media_id = m.id AND em.source <> 'user_excluded' AND em.event_id = ?1"
-                .into(),
-            where_sql: base,
-            params: vec![Value::Integer(*id)],
-            key: date_key.clone(),
-            title: "NULL".into(),
-            subtitle: "NULL".into(),
-            order: "m.taken_at_utc ASC, m.id ASC".into(),
-        },
+        View::Event { id } => {
+            // Etkinlik bir hikâyedir: varsayılan diziliş çekim sırasıyla (eskiden yeniye).
+            let (key, title, dated, order) = if arrange == Arrange::default() {
+                arrangement(Arrange { dir: SortDir::Asc, ..arrange })
+            } else {
+                (key.clone(), title.clone(), dated, order.clone())
+            };
+            Plan {
+                joins:
+                    "JOIN event_media em ON em.media_id = m.id AND em.source <> 'user_excluded' AND em.event_id = ?1"
+                        .into(),
+                where_sql: base,
+                params: vec![Value::Integer(*id)],
+                key,
+                title,
+                subtitle: "NULL".into(),
+                order,
+                dated,
+            }
+        }
         View::Events => Plan {
             joins: "JOIN event_media em ON em.media_id = m.id AND em.source <> 'user_excluded'
                     JOIN events e ON e.id = em.event_id"
@@ -216,6 +309,7 @@ fn plan(conn: &Connection, view: &View, grouping: Grouping, ranked: Option<&[i64
             title: "e.title".into(),
             subtitle: "e.start_utc || ':' || e.end_utc".into(),
             order: "e.start_utc DESC, e.id DESC, m.taken_at_utc DESC, m.id DESC".into(),
+            dated: false,
         },
         View::People => Plan {
             joins: "JOIN (SELECT DISTINCT media_id, person_id FROM v_face_person WHERE person_id IS NOT NULL) vp
@@ -228,6 +322,7 @@ fn plan(conn: &Connection, view: &View, grouping: Grouping, ranked: Option<&[i64
             title: "p.name".into(),
             subtitle: "NULL".into(),
             order: "p.name COLLATE NOCASE, p.id, m.taken_at_utc DESC, m.id DESC".into(),
+            dated: false,
         },
         View::Places => Plan {
             joins: String::new(),
@@ -237,6 +332,7 @@ fn plan(conn: &Connection, view: &View, grouping: Grouping, ranked: Option<&[i64
             title: "COALESCE(l.user_label, l.locality, l.admin2, l.admin1, l.country)".into(),
             subtitle: "COALESCE(l.admin1 || ', ', '') || l.country".into(),
             order: "l.country, l.admin1, COALESCE(l.locality, l.admin2), l.id, m.taken_at_utc DESC, m.id DESC".into(),
+            dated: false,
         },
     })
 }
@@ -306,7 +402,7 @@ pub(crate) fn event_subtitle(raw: &str) -> Option<String> {
     })
 }
 
-fn sections(conn: &Connection, p: &Plan, dated: bool) -> AppResult<Vec<Section>> {
+fn sections(conn: &Connection, p: &Plan) -> AppResult<Vec<Section>> {
     let sql = format!("SELECT {} AS k, {}, {} {} ORDER BY {}", p.key, p.title, p.subtitle, p.from(), p.order);
     let mut stmt = conn.prepare(&sql)?;
     let mut rows = stmt.query(params_from_iter(p.params.iter()))?;
@@ -317,7 +413,7 @@ fn sections(conn: &Connection, p: &Plan, dated: bool) -> AppResult<Vec<Section>>
         match out.last_mut() {
             Some(s) if s.key == key => s.count += 1,
             _ => {
-                let (title, subtitle) = if dated {
+                let (title, subtitle) = if p.dated {
                     date_title(&key)
                 } else {
                     let title: Option<String> = r.get(1)?;
@@ -403,21 +499,9 @@ pub fn slice_ranked(pool: &Pool, req: &TimelineRequest, ranked: Option<&[i64]>) 
     if req.limit == 0 || req.limit > MAX_SLICE {
         return Err(AppError::Invalid(format!("dilim boyu 1–{MAX_SLICE} olmalı: {}", req.limit)));
     }
-    let dated = ranked.is_none()
-        && matches!(
-            req.view,
-            View::All
-                | View::Favorites
-                | View::Library { .. }
-                | View::SmartAlbum { .. }
-                | View::Search { .. }
-                | View::Person { .. }
-                | View::Cluster { .. }
-                | View::Event { .. }
-        );
     pool.read(|c| {
-        let p = plan(c, &req.view, req.grouping, ranked).map_err(to_db)?;
-        let secs = sections(c, &p, dated).map_err(to_db)?;
+        let p = plan(c, &req.view, req.arrange, ranked).map_err(to_db)?;
+        let secs = sections(c, &p).map_err(to_db)?;
         let total = secs.last().map_or(0, |s| s.start + s.count);
         let items = items(c, &p, req.offset, req.limit).map_err(to_db)?;
         Ok(TimelineSlice { total, offset: req.offset, sections: secs, items })
@@ -435,7 +519,7 @@ fn to_db(e: AppError) -> loupe_db::DbError {
 /// Bir görünümdeki medya sayısı (kenar çubuğu sayaçları).
 pub fn count(pool: &Pool, view: &View) -> AppResult<u64> {
     pool.read(|c| {
-        let p = plan(c, view, Grouping::Day, None).map_err(to_db)?;
+        let p = plan(c, view, Arrange::default(), None).map_err(to_db)?;
         let distinct = if matches!(view, View::People) { "DISTINCT m.id" } else { "*" };
         let n: i64 =
             c.query_row(&format!("SELECT count({distinct}) {}", p.from()), params_from_iter(p.params.iter()), |r| {

@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use loupe_core::{ImportMode, ImportSessionId, LibraryId, MediaId, SessionMode, SessionState};
 use loupe_db::models::{ImportSession, NewImportSession};
@@ -93,6 +93,8 @@ struct Running {
 
 /// Arka planda çalışan oturumlar.
 type NewMediaHook = Arc<dyn Fn(&[MediaId]) + Send + Sync>;
+/// İlk oturum başlayınca `true`, son oturum bitince `false` ile çağrılır.
+type BusyHook = Box<dyn Fn(bool) + Send + Sync>;
 
 pub struct Imports {
     pool: Arc<Pool>,
@@ -100,6 +102,28 @@ pub struct Imports {
     libraries: Arc<Libraries>,
     running: Mutex<HashMap<ImportSessionId, Running>>,
     on_new: Option<NewMediaHook>,
+    busy: Arc<Busy>,
+}
+
+/// Süren oturum sayısı; kanca sayaçla aynı kilit altında çağrılır, böylece
+/// `true`/`false` sırası karışmaz.
+#[derive(Default)]
+struct Busy {
+    count: Mutex<usize>,
+    hook: OnceLock<BusyHook>,
+}
+
+impl Busy {
+    fn change(&self, start: bool) {
+        let Ok(mut n) = self.count.lock() else { return };
+        let was = *n > 0;
+        *n = if start { n.saturating_add(1) } else { n.saturating_sub(1) };
+        if was != (*n > 0)
+            && let Some(hook) = self.hook.get()
+        {
+            hook(*n > 0);
+        }
+    }
 }
 
 impl std::fmt::Debug for Imports {
@@ -111,7 +135,19 @@ impl std::fmt::Debug for Imports {
 impl Imports {
     #[must_use]
     pub fn new(pool: Arc<Pool>, queue: Arc<JobQueue>, libraries: Arc<Libraries>) -> Self {
-        Self { pool, queue, libraries, running: Mutex::new(HashMap::new()), on_new: None }
+        Self {
+            pool,
+            queue,
+            libraries,
+            running: Mutex::new(HashMap::new()),
+            on_new: None,
+            busy: Arc::new(Busy::default()),
+        }
+    }
+
+    /// İçe aktarma sürerken toplu işleri bekletmek için (bir kez kurulur).
+    pub fn set_busy_hook(&self, hook: impl Fn(bool) + Send + Sync + 'static) {
+        let _already = self.busy.hook.set(Box::new(hook));
     }
 
     /// Yeni medya kataloğa girince (ör. bulut kuyruğu) çağrılır.
@@ -221,18 +257,21 @@ impl Imports {
         let run = Running::default();
         let handle = Running { cancel: run.cancel.clone(), last_error: run.last_error.clone() };
         self.running.lock().map_err(|_| AppError::Poisoned)?.insert(session, run);
-        let pool = self.pool.clone();
-        std::thread::Builder::new()
-            .name(format!("loupe-import-{}", session.0))
-            .spawn(move || {
-                if let Err(e) = work(&handle) {
-                    if let Ok(mut last) = handle.last_error.lock() {
-                        *last = Some(e.to_string());
-                    }
-                    let _ignored = pool.write(|c| import_repo::set_session_state(c, session, SessionState::Failed));
+        let (pool, busy) = (self.pool.clone(), self.busy.clone());
+        busy.change(true);
+        let spawned = std::thread::Builder::new().name(format!("loupe-import-{}", session.0)).spawn(move || {
+            if let Err(e) = work(&handle) {
+                if let Ok(mut last) = handle.last_error.lock() {
+                    *last = Some(e.to_string());
                 }
-            })
-            .map_err(AppError::io("import iş parçacığı"))?;
+                let _ignored = pool.write(|c| import_repo::set_session_state(c, session, SessionState::Failed));
+            }
+            busy.change(false);
+        });
+        if let Err(e) = spawned {
+            self.busy.change(false);
+            return Err(AppError::io("import iş parçacığı")(e));
+        }
         Ok(())
     }
 
@@ -286,5 +325,24 @@ impl Imports {
             fresh.clear();
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn busy_hook_fires_on_first_start_and_last_finish() {
+        let busy = Busy::default();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let log = seen.clone();
+        let _set = busy.hook.set(Box::new(move |b| log.lock().map(|mut v| v.push(b)).unwrap_or(())));
+        busy.change(true);
+        busy.change(true);
+        busy.change(false);
+        busy.change(false);
+        busy.change(false);
+        assert_eq!(*seen.lock().unwrap(), vec![true, false]);
     }
 }

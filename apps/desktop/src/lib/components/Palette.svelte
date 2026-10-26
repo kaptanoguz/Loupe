@@ -1,6 +1,6 @@
 <script lang="ts" module>
   /** Paletten çalıştırılan uygulama komutları (App yürütür). */
-  export type CommandId = "verify" | "wifi" | "cloud" | "settings" | "people" | "events" | "ai-pause";
+  export type CommandId = "verify" | "wifi" | "iphone" | "cloud" | "settings" | "people" | "events" | "ai-pause";
 
   export interface PaletteCommand {
     id: CommandId;

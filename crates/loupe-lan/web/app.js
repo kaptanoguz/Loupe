@@ -44,6 +44,11 @@ const ui = {
   conflict: $("conflict"),
   conflictName: $("conflict-name"),
   conflictAll: $("conflict-all"),
+  shortcut: $("shortcut"),
+  scCreate: $("sc-create"),
+  scValues: $("sc-values"),
+  scUrl: $("sc-url"),
+  scAuth: $("sc-auth"),
 };
 
 /** Oturum anahtarı: localStorage'da; ayrıca HttpOnly çerez olarak da gelir. */
@@ -136,7 +141,46 @@ function showReady(info) {
   ui.pairing.hidden = true;
   ui.ready.hidden = false;
   ui.server.textContent = `${info.server_name} · ${info.device_name}`;
+  ui.shortcut.hidden = false;
 }
+
+// ───────────────────────────── Kestirme ─────────────────────────────
+
+ui.scCreate.addEventListener("click", async () => {
+  ui.scCreate.disabled = true;
+  try {
+    const res = await fetch("/m/shortcut", { method: "POST", headers: authHeaders() });
+    if (res.status === 401) return lost();
+    if (!res.ok) throw new Error(String(res.status));
+    const body = await res.json();
+    // Sertifika bilgisayarın .local adına verilir; IP ile Kestirmeler bağlanamaz.
+    const port = location.port ? `:${location.port}` : "";
+    ui.scUrl.textContent = `https://${body.host ?? location.hostname}${port}${body.path}`;
+    ui.scAuth.textContent = `Bearer ${body.key}`;
+    ui.scValues.hidden = false;
+    ui.scCreate.textContent = "Yeni anahtar oluştur";
+  } catch {
+    ui.scCreate.textContent = "Olmadı, yeniden deneyin";
+  } finally {
+    ui.scCreate.disabled = false;
+  }
+});
+
+ui.shortcut.addEventListener("click", async (e) => {
+  const btn = e.target instanceof HTMLElement ? e.target.closest("[data-copy]") : null;
+  if (!btn) return;
+  const text = $(btn.dataset.copy)?.textContent ?? "";
+  try {
+    await navigator.clipboard.writeText(text);
+    btn.textContent = "Kopyalandı";
+  } catch {
+    // Pano izni yoksa metni seçili bırak; kullanıcı uzun basıp kopyalar.
+    const range = document.createRange();
+    range.selectNodeContents($(btn.dataset.copy));
+    getSelection()?.removeAllRanges();
+    getSelection()?.addRange(range);
+  }
+});
 
 // ───────────────────────────── kuyruk ─────────────────────────────
 

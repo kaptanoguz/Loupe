@@ -190,6 +190,13 @@ impl WorkerPool {
         self.shared.queue.signal.notify();
     }
 
+    /// İçe aktarma sürerken toplu işler (yüz, CLIP, metadata, `md`) bekler;
+    /// aktarma bitince kendiliğinden sürer.
+    pub fn set_importing(&self, importing: bool) {
+        self.shared.throttle.set_importing(importing);
+        self.shared.queue.signal.notify();
+    }
+
     /// Yeni iş almayı bırakır, süren işlerin bitmesini bekler.
     pub fn shutdown(mut self) {
         self.stop();

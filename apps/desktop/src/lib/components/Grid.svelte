@@ -4,6 +4,8 @@
 
   export interface Slot {
     idx: number;
+    /** Medya kimliği; öğe henüz yüklenmediyse `undefined`. */
+    id: number | undefined;
     x: number;
     y: number;
     w: number;
@@ -21,6 +23,7 @@
 
   const EMPTY: Slot = {
     idx: -1,
+    id: undefined,
     x: 0,
     y: -10_000,
     w: 0,
@@ -167,6 +170,7 @@
       }
       next[k] = {
         idx,
+        id: item?.id,
         x: (rects[o] as number) + PAD,
         y: rects[o + 1] as number,
         w: rects[o + 2] as number,
@@ -218,7 +222,7 @@
 
   function onclick(e: MouseEvent): void {
     const idx = hit(e);
-    if (idx >= 0) catalog.select(idx);
+    if (idx >= 0) catalog.clickSelect(idx, { toggle: e.ctrlKey || e.metaKey, range: e.shiftKey });
   }
 
   function ondblclick(e: MouseEvent): void {
@@ -280,7 +284,7 @@
           y={s.y}
           w={s.w}
           h={s.h}
-          selected={s.idx >= 0 && s.idx === catalog.selected}
+          selected={s.idx >= 0 && (s.idx === catalog.selected || (s.id !== undefined && catalog.marked.has(s.id)))}
           ready={s.ready}
           rating={s.rating}
           label={s.label}

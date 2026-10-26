@@ -8,7 +8,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use image::{DynamicImage, ImageBuffer, Rgb};
-use loupe_app::{AppConfig, AppCore, CullRequest, Grouping, ImportRequest, ImportSessionDto, TimelineRequest, View};
+use loupe_app::{
+    AppConfig, AppCore, Arrange, CullRequest, Grouping, ImportRequest, ImportSessionDto, SortDir, SortKey,
+    TimelineRequest, View,
+};
 use loupe_core::{Blake3Hash, MediaId, TakenAtSource};
 use loupe_db::repo::{location, media};
 use loupe_lan::{Discovery, MemoryDiscovery};
@@ -77,7 +80,14 @@ impl Fx {
     }
 
     fn slice(&self, view: View, grouping: Grouping, offset: u32, limit: u32) -> loupe_app::TimelineSlice {
-        self.core.timeline_slice(&TimelineRequest { view, grouping, offset, limit }).unwrap()
+        self.core
+            .timeline_slice(&TimelineRequest {
+                view,
+                arrange: Arrange { grouping, ..Arrange::default() },
+                offset,
+                limit,
+            })
+            .unwrap()
     }
 
     fn all_ids(&self) -> Vec<i64> {
@@ -137,6 +147,29 @@ fn import_fills_timeline_slices_with_day_and_month_sections() {
     let titles: Vec<(&str, u32)> = months.sections.iter().map(|s| (s.title.as_str(), s.count)).collect();
     assert_eq!(titles, vec![("Ekim 2025", 4), ("Eylül 2025", 1)]);
 
+    // Görünüm seçenekleri: yıl bölümü, ada / puana göre sıralama, yön.
+    let arranged = |arrange: Arrange| {
+        fx.core.timeline_slice(&TimelineRequest { view: View::All, arrange, offset: 0, limit: 10 }).unwrap()
+    };
+    let years = arranged(Arrange { grouping: Grouping::Year, ..Arrange::default() });
+    assert_eq!(years.sections.iter().map(|s| (s.title.as_str(), s.count)).collect::<Vec<_>>(), vec![("2025", 5)]);
+    let by_name = arranged(Arrange { sort: SortKey::Name, dir: SortDir::Asc, ..Arrange::default() });
+    let names: Vec<String> = by_name
+        .items
+        .iter()
+        .map(|i| fx.core.pool().read(|c| media::get(c, MediaId(i.id))).unwrap().unwrap().original_filename)
+        .collect();
+    assert_eq!(names, ["IMG_0001.JPG", "IMG_0002.JPG", "IMG_0003.JPG", "IMG_0004.JPG", "IMG_0005.JPG"]);
+    assert_eq!(by_name.sections.len(), 1);
+    let rated = by_name.items[2].id;
+    fx.core.pool().write(|c| Ok(c.execute("UPDATE media_files SET rating = 4 WHERE id = ?1", [rated])?)).unwrap();
+    let by_rating = arranged(Arrange { sort: SortKey::Rating, ..Arrange::default() });
+    assert_eq!(by_rating.items[0].id, rated);
+    let secs: Vec<(&str, u32)> = by_rating.sections.iter().map(|s| (s.title.as_str(), s.count)).collect();
+    assert_eq!(secs, vec![("4 yıldız", 1), ("Puansız", 4)]);
+    let flat = arranged(Arrange { sort: SortKey::Added, dir: SortDir::Asc, grouping: Grouping::None });
+    assert_eq!((flat.sections.len(), flat.total), (1, 5));
+
     // En-boy oranı: pHash için çözülen boyut; EXIF yönlendirmesi 6 ise yer değiştirir.
     let portrait = rest.items.iter().chain(&first.items).find(|i| (i.aspect - 2.0 / 3.0).abs() < 0.01);
     assert!(portrait.is_some(), "dikey kare 2:3 olmalı");
@@ -175,7 +208,7 @@ fn import_fills_timeline_slices_with_day_and_month_sections() {
 
     assert!(
         fx.core
-            .timeline_slice(&TimelineRequest { view: View::All, grouping: Grouping::Day, offset: 0, limit: 0 })
+            .timeline_slice(&TimelineRequest { view: View::All, arrange: Arrange::default(), offset: 0, limit: 0 })
             .is_err()
     );
 }
@@ -431,7 +464,7 @@ fn events_people_and_smart_album_views() {
         fx.core
             .timeline_slice(&TimelineRequest {
                 view: View::SmartAlbum { id: 42 },
-                grouping: Grouping::Day,
+                arrange: Arrange::default(),
                 offset: 0,
                 limit: 5
             })
@@ -607,4 +640,77 @@ fn managed_library_with_existing_photos_is_indexed_in_place() {
     drop(core);
     let core = AppCore::open(AppConfig::in_dir(&dir)).unwrap();
     assert_eq!(sessions(&core), before);
+}
+
+/// Klasörü Loupe'den kaldırmak kataloğu temizler, diskteki dosyalara dokunmaz.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn removing_a_library_forgets_its_photos_but_keeps_files() {
+    let fx = Fx::new();
+    write_jpeg(&fx.lib_root.join("IMG_A.JPG"), 200, 150, 21, 0);
+    write_jpeg(&fx.lib_root.join("IMG_B.JPG"), 150, 200, 22, 1);
+    let other = fx.tmp.path().join("Diger");
+    fs::create_dir_all(&other).unwrap();
+    write_jpeg(&other.join("IMG_C.JPG"), 120, 90, 23, 2);
+    let (keep, scan) = fx.core.add_library_root(&other, Some("Diğer"), false).unwrap();
+    wait_done(&fx.core, scan.unwrap().id);
+    let (lib, scan) = fx.core.add_library_root(&fx.lib_root, Some("Fotoğraflar"), true).unwrap();
+    wait_done(&fx.core, scan.unwrap().id);
+    assert_eq!(fx.all_ids().len(), 3);
+
+    let (removed, lan_stopped) = fx.core.remove_library(lib.id).await.unwrap();
+    assert_eq!((removed, lan_stopped), (2, false));
+    let libs = fx.core.libraries().unwrap();
+    assert_eq!(libs.iter().map(|l| l.id).collect::<Vec<_>>(), vec![keep.id]);
+    assert_eq!(fx.all_ids().len(), 1, "diğer kütüphane yerinde");
+    assert!(fx.lib_root.join("IMG_A.JPG").is_file() && fx.lib_root.join("IMG_B.JPG").is_file());
+    assert!(fx.core.remove_library(lib.id).await.is_err(), "olmayan kütüphane");
+}
+
+/// Sahte Çöp Kutusu: dosyaları bir klasöre taşır, adı `KILITLI` olanı taşıyamaz.
+struct FakeTrash(PathBuf);
+
+impl loupe_app::trash::Trasher for FakeTrash {
+    fn trash(&self, paths: &[PathBuf]) -> loupe_app::AppResult<String> {
+        for p in paths {
+            if !p.to_string_lossy().contains("KILITLI") {
+                fs::rename(p, self.0.join(p.file_name().unwrap())).unwrap();
+            }
+        }
+        Ok("gio: çöp dizini oluşturulamıyor".into())
+    }
+}
+
+#[test]
+fn trashing_photos_moves_files_and_sidecars_then_forgets_them() {
+    let fx = Fx::new();
+    write_jpeg(&fx.lib_root.join("IMG_A.JPG"), 200, 150, 31, 0);
+    write_jpeg(&fx.lib_root.join("IMG_B.JPG"), 150, 200, 32, 1);
+    write_jpeg(&fx.lib_root.join("KILITLI.JPG"), 120, 90, 33, 2);
+    fs::write(fx.lib_root.join("IMG_A.JPG.loupe.json"), b"{}").unwrap();
+    let (_, scan) = fx.core.add_library_root(&fx.lib_root, Some("Fotoğraflar"), true).unwrap();
+    wait_done(&fx.core, scan.unwrap().id);
+    fs::write(fx.lib_root.join("KILITLI.JPG.loupe.json"), b"{}").unwrap();
+    let by_name = |name: &str| {
+        fx.all_ids()
+            .into_iter()
+            .find(|&id| fx.core.pool().read(|c| media::get(c, MediaId(id))).unwrap().unwrap().original_filename == name)
+            .unwrap()
+    };
+    let (a, b, locked) = (by_name("IMG_A.JPG"), by_name("IMG_B.JPG"), by_name("KILITLI.JPG"));
+    let bin = fx.tmp.path().join("Cop");
+    fs::create_dir_all(&bin).unwrap();
+    // B diskten başka yoldan silinmiş: yalnızca kaydı kalkar.
+    fs::remove_file(fx.lib_root.join("IMG_B.JPG")).unwrap();
+
+    let out = fx.core.trash_media_with(&[a, b, locked, 999_999], &FakeTrash(bin.clone())).unwrap();
+    assert_eq!(out.trashed, 3);
+    assert!(out.failed.is_empty(), "{:?}", out.failed);
+    assert!(bin.join("IMG_A.JPG").is_file() && bin.join("IMG_A.JPG.loupe.json").is_file(), "sidecar birlikte");
+    // Sistem Çöp Kutusu'nun kabul etmediği dosya aynı diskte `.loupe/trash/<gün>/`e gider.
+    assert_eq!(out.loupe_trash, 1);
+    let day = PathBuf::from(out.loupe_trash_dir.unwrap());
+    assert!(day.starts_with(fx.lib_root.join(".loupe/trash")));
+    assert!(day.join("KILITLI.JPG").is_file() && day.join("KILITLI.JPG.loupe.json").is_file());
+    assert!(!fx.lib_root.join("KILITLI.JPG").exists());
+    assert!(fx.all_ids().is_empty());
 }

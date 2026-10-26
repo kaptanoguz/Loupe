@@ -25,6 +25,8 @@ import type {
   ImageSize,
   ImportRequest,
   ImportSessionDto,
+  IphoneDto,
+  TrashResultDto,
   InspectorDetail,
   LibraryDto,
   PairingQrDto,
@@ -317,30 +319,45 @@ export class MockBackend implements Backend {
   }
 
   async timelineSlice(req: TimelineRequest): Promise<TimelineSlice> {
-    const all = this.viewItems(req);
+    const all = this.viewItems(req).slice();
+    // Örnek veride eklenme sırası = kimlik; ad ve boyut kimlikten türetilir.
+    const value = (it: TileItem): number =>
+      req.sort === "rating" ? it.rating : req.sort === "taken" ? it.takenAtUtc : req.sort === "size" ? (it.id * 7919) % 1000 : it.id;
+    const sign = req.dir === "asc" ? 1 : -1;
+    all.sort((a, b) =>
+      req.sort === "rating" ? b.rating - a.rating || b.takenAtUtc - a.takenAtUtc : sign * (value(a) - value(b)) || sign * (a.id - b.id),
+    );
+    const dated = req.sort === "taken" || req.sort === "added";
     const sections: Section[] = [];
     for (let i = 0; i < all.length; i++) {
       const it = all[i] as TileItem;
       const d = new Date((it.takenAtUtc + (it.tzOffsetMin ?? 0) * 60) * 1000);
-      const key =
-        req.grouping === "month"
-          ? `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}`
-          : `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
+      let key: string;
+      let title: string;
+      let subtitle: string | null = null;
+      if (req.sort === "rating") {
+        key = `r${it.rating}`;
+        title = it.rating === 0 ? "Puansız" : `${it.rating} yıldız`;
+      } else if (!dated || req.grouping === "none") {
+        key = "all";
+        title = req.sort === "name" ? "Ada göre" : req.sort === "size" ? "Boyuta göre" : "Tümü";
+      } else if (req.grouping === "year") {
+        key = `${d.getUTCFullYear()}`;
+        title = key;
+      } else if (req.grouping === "month") {
+        key = `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}`;
+        title = `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+      } else {
+        key = `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
+        title = `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+        subtitle = DAYS[d.getUTCDay()] ?? null;
+      }
       const last = sections.at(-1);
       if (last && last.key === key) {
         last.count++;
         continue;
       }
-      sections.push({
-        key,
-        title:
-          req.grouping === "month"
-            ? `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`
-            : `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`,
-        subtitle: req.grouping === "month" ? null : (DAYS[d.getUTCDay()] ?? null),
-        start: i,
-        count: 1,
-      });
+      sections.push({ key, title, subtitle, start: i, count: 1 });
     }
     return {
       total: all.length,
@@ -503,6 +520,17 @@ export class MockBackend implements Backend {
   }
   async pickImportSource(): Promise<string | null> {
     return null;
+  }
+  async findIphone(): Promise<IphoneDto[]> {
+    return [];
+  }
+  async trashMedia(ids: number[]): Promise<TrashResultDto> {
+    return { trashed: ids.length, loupeTrash: 0, loupeTrashDir: null, failed: [] };
+  }
+  async removeLibrary(id: number): Promise<number> {
+    const lib = this.libraries.find((l) => l.id === id);
+    this.libraries = this.libraries.filter((l) => l.id !== id);
+    return lib?.mediaCount ?? 0;
   }
   async startImport(req: ImportRequest): Promise<ImportSessionDto> {
     return {

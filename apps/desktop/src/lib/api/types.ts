@@ -19,11 +19,20 @@ export type View =
 
 export type ViewKey = "all" | "favorites" | "events" | "people" | "places";
 
-export type Grouping = "day" | "month";
+/** Tarih sıralamalarında bölümleme; `none` tek bölüm. */
+export type Grouping = "day" | "month" | "year" | "none";
+export type SortKey = "taken" | "added" | "name" | "size" | "rating";
+export type SortDir = "desc" | "asc";
 
-export interface TimelineRequest {
-  view: View;
+/** Fotoğraf görünümünün dizilişi (görünümler arasında ortak, kalıcı). */
+export interface Arrange {
+  sort: SortKey;
+  dir: SortDir;
   grouping: Grouping;
+}
+
+export interface TimelineRequest extends Arrange {
+  view: View;
   offset: number;
   limit: number;
 }
@@ -183,6 +192,21 @@ export interface ImportRequest {
   libraryId: number;
   source: string;
   mode: ImportMode;
+}
+
+/** Çöp Kutusu'na taşıma sonucu; taşınamayanlar katalogda kalır. */
+export interface TrashResultDto {
+  trashed: number;
+  /** Sistem Çöp Kutusu kurulamayan diskte `.loupe/trash/` klasörüne taşınanlar. */
+  loupeTrash: number;
+  loupeTrashDir: string | null;
+  failed: { id: number; reason: string }[];
+}
+
+/** Kabloyla bağlı iPhone: `dcim` içe aktarma kaynağıdır. */
+export interface IphoneDto {
+  udid: string;
+  dcim: string;
 }
 
 export interface ImportSessionDto {

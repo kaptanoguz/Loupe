@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/svelte";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/svelte";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import App from "./App.svelte";
@@ -39,7 +39,8 @@ describe("App", () => {
     const { container } = setup();
     await waitFor(() => expect(container.querySelectorAll(".tile[data-idx]:not([style*='display: none'])").length).toBeGreaterThan(10));
     expect(screen.getByRole("navigation", { name: "Kenar çubuğu" })).toBeTruthy();
-    expect(screen.getByText("Tüm Fotoğraflar")).toBeTruthy();
+    expect(screen.getAllByText("Tüm Fotoğraflar").length).toBe(2);
+    expect(screen.getByRole("heading", { name: "Tüm Fotoğraflar" })).toBeTruthy();
     expect(screen.getByText("Fotoğraflar")).toBeTruthy();
     expect(screen.getByRole("complementary", { name: "Denetçi" })).toBeTruthy();
     expect(screen.getByRole("contentinfo", { name: "Durum" }).textContent).toContain("400 fotoğraf");
@@ -49,6 +50,23 @@ describe("App", () => {
     expect(container.querySelectorAll("circle").length).toBe(0);
     // Yalnızca görünür alan + taşma payı DOM'da.
     expect(container.querySelectorAll(".tile").length).toBeLessThan(400);
+  });
+
+  it("görünüm seçenekleri sıralamayı ve gruplamayı değiştirir, seçimi saklar", async () => {
+    const { backend, container } = setup();
+    const slice = vi.spyOn(backend, "timelineSlice");
+    await waitFor(() => expect(container.querySelectorAll(".tile[data-idx]").length).toBeGreaterThan(10));
+    await fireEvent.click(screen.getByRole("button", { name: "Çekim tarihi" }));
+    const menu = screen.getByRole("dialog", { name: "Görünüm seçenekleri" });
+    await fireEvent.click(within(menu).getByRole("button", { name: "Yıl" }));
+    await waitFor(() => expect(slice).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "taken", grouping: "year" })));
+    await fireEvent.click(within(menu).getByRole("button", { name: "Puan" }));
+    await waitFor(() => expect(slice).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "rating", dir: "desc" })));
+    expect(within(menu).getByRole("button", { name: "Gün" }).closest("fieldset")?.disabled).toBe(true);
+    expect(JSON.parse(localStorage.getItem("loupe.arrange") ?? "{}")).toMatchObject({ sort: "rating", grouping: "year" });
+    await fireEvent.click(within(menu).getByRole("button", { name: "Büyük" }));
+    expect(within(menu).getByRole("button", { name: "Büyük" }).getAttribute("aria-pressed")).toBe("true");
+    localStorage.removeItem("loupe.arrange");
   });
 
   it("görünür alanı çekirdeğe önceliklendirir", async () => {

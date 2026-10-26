@@ -178,7 +178,7 @@ fn copy_import_places_verified_file_and_keeps_source() {
     assert_eq!(m.placement, Placement::Copy);
     assert_eq!(m.blake3.0, *blake3::hash(&fs::read(&placed).unwrap()).as_bytes());
     assert_eq!((m.width, m.height), (Some(320), Some(240)));
-    assert!(m.phash.is_some());
+    assert!(m.phash.is_none(), "pHash içe aktarmayı yavaşlatmasın diye md küçük resminden gelir");
     assert_eq!(m.import_session_id, Some(fx.session));
     assert_eq!(m.inode, Some(fs::metadata(&placed).unwrap().ino()));
     let s = fx.pool.read(|c| import_repo::get_session(c, fx.session)).unwrap().unwrap();

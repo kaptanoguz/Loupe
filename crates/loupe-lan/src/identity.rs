@@ -42,7 +42,7 @@ fn datetime(ms: i64) -> Result<OffsetDateTime, LanError> {
         .map_err(|e| LanError::BadRequest(format!("geçersiz zaman: {e}")))
 }
 
-fn random_serial() -> SerialNumber {
+pub(crate) fn random_serial() -> SerialNumber {
     let mut b = [0u8; 16];
     rand::rng().fill_bytes(&mut b);
     // DER INTEGER pozitif kalsın.
@@ -51,14 +51,14 @@ fn random_serial() -> SerialNumber {
     SerialNumber::from_slice(&b)
 }
 
-fn validity(params: &mut CertificateParams, now_ms: i64, days: i64) -> Result<i64, LanError> {
+pub(crate) fn validity(params: &mut CertificateParams, now_ms: i64, days: i64) -> Result<i64, LanError> {
     let now = datetime(now_ms)?;
     params.not_before = now - time::Duration::seconds(SKEW_SECS);
     params.not_after = now + time::Duration::days(days);
     Ok(params.not_after.unix_timestamp().saturating_mul(1000))
 }
 
-fn dn(common_name: &str) -> DistinguishedName {
+pub(crate) fn dn(common_name: &str) -> DistinguishedName {
     let mut d = DistinguishedName::new();
     d.push(DnType::OrganizationName, "Loupe");
     d.push(DnType::CommonName, common_name);
@@ -271,7 +271,7 @@ impl ServerIdentity {
     }
 }
 
-fn pem_cert(pem: &str) -> Result<CertificateDer<'static>, LanError> {
+pub(crate) fn pem_cert(pem: &str) -> Result<CertificateDer<'static>, LanError> {
     use rustls_pki_types::pem::PemObject;
     CertificateDer::from_pem_slice(pem.as_bytes()).map_err(|e| LanError::BadRequest(format!("PEM sertifika: {e}")))
 }

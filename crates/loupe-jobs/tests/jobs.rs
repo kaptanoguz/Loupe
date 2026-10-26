@@ -11,7 +11,7 @@ use loupe_core::{
     Blake3Hash, ImportMode, LibraryId, LibraryKind, MediaId, NewMediaFile, Placement, RelPath, TakenAtSource, classify,
 };
 use loupe_db::models::NewLibrary;
-use loupe_db::repo::{library, location, thumbnail};
+use loupe_db::repo::{library, location, media, thumbnail};
 use loupe_db::{Pool, PoolConfig, insert_media_batch};
 use loupe_jobs::{
     Job, JobContext, JobError, JobHandler, JobKind, JobQueue, JobState, MediaPipeline, NewJob, Priority, ResourceMode,
@@ -454,6 +454,8 @@ fn pipeline_thumbnails_metadata_location_and_corrupt_file_goes_dead() {
     assert_eq!((row.width, row.height, row.format.as_str(), row.source_kind.as_str()), (256, 171, "webp", "decode"));
     let md = e.pool.read(|c| thumbnail::get(c, good, "md")).unwrap().unwrap();
     assert_eq!((md.width, md.height), (768, 512));
+    let phash = e.pool.read(|c| media::get(c, good)).unwrap().unwrap().phash;
+    assert!(phash.is_some(), "pHash md küçük resminden doldurulur");
     assert!(cache.lookup(&row.source_blake3, loupe_media::ThumbSize::Sm).is_some());
     let tall_row = e.pool.read(|c| thumbnail::get(c, tall, "sm")).unwrap().unwrap();
     assert_eq!((tall_row.width, tall_row.height), (171, 256), "EXIF yönlendirmesi uygulanmış olmalı");

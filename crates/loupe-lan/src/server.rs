@@ -47,7 +47,8 @@ use crate::store::{self, Device, write_tx};
 use crate::tus::{CreateOutcome, ManifestEntry, ManifestItem, UploadMeta, UploadService};
 use crate::web::{self, PrecheckItem, PrecheckResponse, WebPairRequest, WebSession};
 use crate::{
-    Clock, DeviceRegistry, LanError, PairingManager, PairingPayload, ServerIdentity, Telemetry, server_config,
+    Clock, DeviceRegistry, LanError, PairingManager, PairingPayload, ServerIdentity, Telemetry, WebCa,
+    tls::server_config_with_web,
 };
 
 pub const TUS_VERSION: &str = "1.0.0";
@@ -63,12 +64,26 @@ pub struct LanConfig {
     pub display_name: String,
     /// Cihaz başına aynı anda açık yükleme oturumu.
     pub max_active_per_device: usize,
+    /// Telefona profil olarak kurulan ad kısıtlı CA; varsa IP ya da `*.local`
+    /// ile gelen bağlantılara bu CA'nın yaprağı sunulur ([`crate::webca`]).
+    pub web_ca: Option<Arc<WebCa>>,
+    /// Yaprak sertifikanın adları (`<makine>.local`) ve LAN adresleri.
+    pub web_hosts: Vec<String>,
+    pub web_ips: Vec<IpAddr>,
 }
 
 impl LanConfig {
     #[must_use]
     pub fn new(bind: SocketAddr, library_id: LibraryId, display_name: &str) -> Self {
-        Self { bind, library_id, display_name: display_name.to_owned(), max_active_per_device: 4 }
+        Self {
+            bind,
+            library_id,
+            display_name: display_name.to_owned(),
+            max_active_per_device: 4,
+            web_ca: None,
+            web_hosts: Vec::new(),
+            web_ips: Vec::new(),
+        }
     }
 }
 
@@ -181,7 +196,11 @@ impl LanServer {
         let p = pool.clone();
         let certs = tokio::task::spawn_blocking(move || p.read(|c| Ok(store::active_device_certs(c, now)))).await??;
         registry.replace_all(certs?);
-        let tls = TlsAcceptor::from(server_config(&identity, registry.clone())?);
+        let leaf = match &cfg.web_ca {
+            Some(ca) => Some(ca.leaf(&cfg.web_hosts, &cfg.web_ips, clock.now_ms())?),
+            None => None,
+        };
+        let tls = TlsAcceptor::from(server_config_with_web(&identity, registry.clone(), leaf.as_ref())?);
         let telemetry = Arc::new(Telemetry::new());
         let uploads = Arc::new(UploadService::new(
             pool.clone(),
@@ -212,6 +231,12 @@ impl LanServer {
     #[must_use]
     pub const fn local_addr(&self) -> SocketAddr {
         self.local_addr
+    }
+
+    /// Telefonlardan gelen dosyaların yazıldığı kütüphane.
+    #[must_use]
+    pub fn library_id(&self) -> LibraryId {
+        self.shared.cfg.library_id
     }
 
     #[must_use]
@@ -311,6 +336,9 @@ fn router(state: AppState) -> Router {
     r.route("/", get(|| async { (StatusCode::SEE_OTHER, [(header::LOCATION, "/m")]).into_response() }))
         .route("/m/session", post(web_pair).get(web_whoami))
         .route("/m/precheck", post(web_precheck))
+        .route("/m/loupe.mobileconfig", get(web_profile))
+        .route("/m/shortcut", post(web_shortcut_key))
+        .route("/s/upload", post(shortcut_upload))
         .route("/pair", post(pair))
         .route("/manifest", post(manifest))
         .route("/files", post(create).options(options_files))
@@ -526,6 +554,64 @@ async fn web_precheck(
     let pairs: Vec<(String, i64)> = items.into_iter().map(|i| (i.device_asset_id, i.modified_at)).collect();
     let known = blocking(move || pool.read(|c| Ok(store::known_assets(c, device.id, &pairs)))?).await?;
     Ok(Json(PrecheckResponse { known }).into_response())
+}
+
+/// Ad kısıtlı CA'yı telefona kuran yapılandırma profili (gizli bilgi içermez).
+async fn web_profile(State(st): State<AppState>) -> Response {
+    let s = &st.0;
+    let Some(ca) = &s.cfg.web_ca else { return StatusCode::NOT_FOUND.into_response() };
+    let body = ca.mobileconfig(s.identity.install_id(), &s.cfg.display_name);
+    let mut res = body.into_response();
+    let h = res.headers_mut();
+    h.insert(header::CONTENT_TYPE, HeaderValue::from_static("application/x-apple-aspen-config"));
+    h.insert(header::CONTENT_DISPOSITION, HeaderValue::from_static("attachment; filename=\"loupe.mobileconfig\""));
+    res
+}
+
+/// Eşleşmiş tarayıcı, Kestirmeler için ayrı bir anahtar alır: ayrı cihaz
+/// satırıdır, masaüstünden tek başına iptal edilebilir.
+async fn web_shortcut_key(
+    State(st): State<AppState>,
+    Extension(pc): Extension<PeerCert>,
+    headers: HeaderMap,
+) -> ApiResult {
+    let device = authed(&st, &pc, &headers).await?;
+    let s = &st.0;
+    let key = web::new_session_key();
+    let fp = web::session_fingerprint(&key);
+    let now = s.clock.now_ms();
+    let name = format!("{} · Kestirme", device.name.chars().take(60).collect::<String>());
+    let (pool, lib, n) = (s.pool.clone(), s.cfg.library_id, name.clone());
+    let device_id = blocking(move || {
+        write_tx(&pool, |c| store::insert_web_device(c, &n, "ios", &fp, lib, now, now + web::WEB_SESSION_TTL_MS))
+    })
+    .await?;
+    s.registry.insert(fp, device_id);
+    let mut res = Json(serde_json::json!({
+        "device_id": device_id,
+        "device_name": name,
+        "key": key,
+        "path": "/s/upload",
+        "host": s.cfg.web_hosts.first(),
+    }))
+    .into_response();
+    res.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(res)
+}
+
+/// Kestirmeler: `POST /s/upload`, gövde = dosyanın kendisi,
+/// `Authorization: Bearer <anahtar>`, isteğe bağlı `X-Loupe-Name`.
+async fn shortcut_upload(
+    State(st): State<AppState>,
+    Extension(pc): Extension<PeerCert>,
+    headers: HeaderMap,
+    body: Body,
+) -> ApiResult {
+    authed(&st, &pc, &headers).await?;
+    let name = header_str(&headers, "x-loupe-name").map(str::trim).filter(|n| !n.is_empty());
+    let out = st.0.uploads.receive_whole(name, None, body.into_data_stream()).await?;
+    let status = if out.duplicate { "duplicate" } else { "saved" };
+    Ok(Json(serde_json::json!({ "status": status, "media_id": out.media_id.0 })).into_response())
 }
 
 async fn options_files() -> Response {

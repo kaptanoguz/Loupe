@@ -126,6 +126,25 @@ impl Libraries {
             .ok_or_else(|| AppError::LibraryOffline(format!("kütüphane {} çevrimdışı ya da yönetilmiyor", id.0)))
     }
 
+    /// Kütüphaneyi kataloğdan kaldırır; klasördeki dosyalara dokunmaz.
+    /// Silinen medya kaydı sayısını döner.
+    pub fn remove(&self, id: LibraryId) -> AppResult<u64> {
+        self.pool.read(|c| library::require(c, id))?;
+        self.importers.lock().map_err(|_| AppError::Poisoned)?.remove(&id);
+        self.roots.write().map_err(|_| AppError::Poisoned)?.remove(&id);
+        let mut total = 0u64;
+        loop {
+            // 500'lük işlemler: büyük kütüphanede yazma kilidi uzun tutulmaz.
+            let n = self.pool.write(|c| library::remove_media_batch(c, id, 500))?;
+            if n == 0 {
+                break;
+            }
+            total += n as u64;
+        }
+        self.pool.write(|c| library::remove_emptied(c, id))?;
+        Ok(total)
+    }
+
     /// Her kütüphaneyi bağlı disklerde arar, durumunu kataloğa yazar,
     /// çevrimiçi yönetilen kütüphanelerin importer'ını açar.
     pub fn refresh(&self) -> AppResult<Vec<LibraryDto>> {
