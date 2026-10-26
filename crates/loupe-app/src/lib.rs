@@ -14,6 +14,7 @@ pub mod error;
 pub mod full;
 pub mod import;
 pub mod inspector;
+pub mod iphone;
 pub mod library;
 pub mod models;
 pub mod moments;
@@ -22,6 +23,7 @@ pub mod people;
 pub mod search;
 pub mod secrets;
 pub mod timeline;
+pub mod trash;
 pub mod verify;
 
 pub use ai::{AiMode, AiStatusDto};
@@ -40,5 +42,7 @@ pub use network::{CloudTargetStatusDto, DeviceDto, LanStatusDto, PairingQrDto};
 pub use people::{FaceRef, PeopleDto, PersonCard};
 pub use search::{PaletteRequest, PaletteResult};
 pub use secrets::{FileSecretStore, LayeredSecretStore, SecretServiceStore, SecretStore};
-pub use timeline::{Grouping, Section, SmartAlbumDto, TileItem, TimelineRequest, TimelineSlice, View};
+pub use timeline::{
+    Arrange, Grouping, Section, SmartAlbumDto, SortDir, SortKey, TileItem, TimelineRequest, TimelineSlice, View,
+};
 pub use verify::VerifyRunDto;

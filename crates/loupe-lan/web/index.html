@@ -59,6 +59,38 @@
 
         <ol id="list" class="list mono small" aria-label="Dosyalar"></ol>
       </section>
+
+      <details id="shortcut" class="panel" hidden>
+        <summary>iPhone Kestirmesi: albümü tek dokunuşla gönder</summary>
+        <ol class="steps">
+          <li>
+            <a class="btn" href="/m/loupe.mobileconfig">Sertifika profilini indir</a>
+            <p class="hint">
+              Ayarlar → <b>Profil İndirildi</b> → Yükle. Sonra Ayarlar → Genel → Hakkında →
+              <b>Sertifika Güven Ayarları</b> → "Loupe yerel ağ" anahtarını açın. Profil yalnızca
+              <span class="mono">.local</span> adları ve ev ağı adresleri için geçerlidir.
+            </p>
+          </li>
+          <li>
+            <button id="sc-create" class="btn" type="button">Kestirme anahtarı oluştur</button>
+            <div id="sc-values" hidden>
+              <p class="hint">Adres</p>
+              <div class="copy"><code id="sc-url" class="mono small"></code><button class="btn" type="button" data-copy="sc-url">Kopyala</button></div>
+              <p class="hint">Authorization başlığının değeri</p>
+              <div class="copy"><code id="sc-auth" class="mono small"></code><button class="btn" type="button" data-copy="sc-auth">Kopyala</button></div>
+            </div>
+          </li>
+          <li>
+            <p class="hint">
+              <b>Kestirmeler</b> uygulamasında yeni kestirme: <b>Fotoğrafları Bul</b> (Albüm = gönderilecek albüm;
+              ya da <b>Fotoğrafları Seç</b>, "Birden Fazla Seç" açık) → <b>Her Biri İçin Tekrarla</b> → içine
+              <b>URL'nin İçeriğini Al</b>: URL = adres, Yöntem = POST, Başlık <span class="mono">Authorization</span> =
+              yukarıdaki değer, İstek Gövdesi = Dosya → <b>Tekrar Öğesi</b>.
+            </p>
+            <p class="hint">Daha önce gönderilenler masaüstünde aynı içerik olarak tanınır ve atlanır.</p>
+          </li>
+        </ol>
+      </details>
     </main>
 
     <dialog id="conflict" aria-labelledby="conflict-title">

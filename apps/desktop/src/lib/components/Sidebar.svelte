@@ -1,11 +1,13 @@
 <script lang="ts">
   import Calendar from "@lucide/svelte/icons/calendar";
   import CommandIcon from "@lucide/svelte/icons/command";
+  import FolderMinus from "@lucide/svelte/icons/folder-minus";
   import FolderPlus from "@lucide/svelte/icons/folder-plus";
   import Heart from "@lucide/svelte/icons/heart";
   import GalleryVerticalEnd from "@lucide/svelte/icons/gallery-vertical-end";
   import MapIcon from "@lucide/svelte/icons/map";
   import ScanFace from "@lucide/svelte/icons/scan-face";
+  import Smartphone from "@lucide/svelte/icons/smartphone";
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import WandSparkles from "@lucide/svelte/icons/wand-sparkles";
   import Wifi from "@lucide/svelte/icons/wifi";
@@ -19,10 +21,27 @@
     catalog: Catalog;
     onAddFolder: () => void;
     onImport: (mode: ImportMode) => void;
+    onImportIphone: () => void;
+    onRemoveLibrary: (id: number) => Promise<void>;
+    searchingIphone: boolean;
     importing: ImportSessionDto | null;
   }
 
-  let { catalog, onAddFolder, onImport, importing }: Props = $props();
+  let { catalog, onAddFolder, onImport, onImportIphone, onRemoveLibrary, searchingIphone, importing }: Props =
+    $props();
+  /** Kaldırma onayı bekleyen kütüphane. */
+  let confirming = $state<number | null>(null);
+  let removing = $state(false);
+
+  async function remove(id: number): Promise<void> {
+    removing = true;
+    try {
+      await onRemoveLibrary(id);
+    } finally {
+      removing = false;
+      confirming = null;
+    }
+  }
   let mode = $state<ImportMode>("copy");
 
   const VIEWS: { key: ViewKey; name: string; icon: Component }[] = [
@@ -73,7 +92,7 @@
     <ul>
       {#each catalog.sidebar?.libraries ?? [] as lib (lib.id)}
         {@const view = libraryView(lib.id)}
-        <li>
+        <li class="group relative">
           <button
             class="flex w-full items-center gap-2 px-3 py-1 text-left hover:bg-raised"
             class:bg-raised={active(view)}
@@ -96,8 +115,29 @@
                   : "çevrimdışı"}
               </span>
             </span>
-            <span class="data text-2xs text-ink-3">{count(lib.mediaCount)}</span>
+            <span class="data text-2xs text-ink-3 group-hover:invisible">{count(lib.mediaCount)}</span>
           </button>
+          <button
+            class="absolute top-1 right-2 hidden p-1 text-ink-3 group-hover:block hover:text-ink"
+            onclick={() => (confirming = lib.id)}
+            title="Loupe'den kaldır (dosyalar diskte kalır)"
+            aria-label="{lib.name} klasörünü kaldır"
+          >
+            <FolderMinus size={14} strokeWidth={1.5} />
+          </button>
+          {#if confirming === lib.id}
+            <div class="border-y border-line bg-raised px-3 py-2 text-xs" role="alertdialog" aria-label="Klasörü kaldır">
+              <p class="text-ink">
+                {count(lib.mediaCount)} kayıt Loupe'den çıkar. Diskteki dosyalara dokunulmaz.
+              </p>
+              <div class="mt-2 flex gap-2">
+                <button class="btn btn-primary" disabled={removing} onclick={() => remove(lib.id)}>
+                  {removing ? "Kaldırılıyor…" : "Kaldır"}
+                </button>
+                <button class="btn" disabled={removing} onclick={() => (confirming = null)}>Vazgeç</button>
+              </div>
+            </div>
+          {/if}
         </li>
       {:else}
         <li class="px-3 py-1 text-xs text-ink-3">Kütüphane yok</li>
@@ -182,6 +222,14 @@
       </button>
       <button class="btn btn-primary flex-1 justify-center" onclick={() => onImport(mode)}>İçe Aktar</button>
     </div>
+    <button
+      class="btn w-full justify-center"
+      onclick={onImportIphone}
+      disabled={searchingIphone}
+      title="Kabloyla bağlı iPhone'un fotoğraflarını kopyala"
+    >
+      <Smartphone size={14} strokeWidth={1.5} />{searchingIphone ? "iPhone aranıyor…" : "iPhone'dan İçe Aktar"}
+    </button>
   </div>
 
   <div class="flex h-8 shrink-0 items-stretch border-t border-line text-xs" aria-label="Hızlı erişim">

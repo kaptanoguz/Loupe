@@ -7,6 +7,7 @@
   import type { View } from "../api/types";
   import { count } from "../format";
   import type { Catalog } from "../state/catalog.svelte";
+  import ArrangeMenu from "./ArrangeMenu.svelte";
 
   interface Props {
     catalog: Catalog;
@@ -22,7 +23,23 @@
   const album = $derived(
     view.kind === "smart_album" ? catalog.sidebar?.smartAlbums.find((a) => a.id === view.id) : undefined,
   );
-  const title = $derived(catalog.heading?.title ?? album?.name ?? "");
+  /** Kenar çubuğundan açılan kök görünümler: geri düğmesi yok. */
+  const root = $derived(["all", "favorites", "places", "library"].includes(view.kind));
+  const rootTitle = $derived.by(() => {
+    switch (view.kind) {
+      case "all":
+        return "Tüm Fotoğraflar";
+      case "favorites":
+        return "Favoriler";
+      case "places":
+        return "Yerler";
+      case "library":
+        return catalog.sidebar?.libraries.find((l) => l.id === view.id)?.name ?? "Klasör";
+      default:
+        return "";
+    }
+  });
+  const title = $derived(root ? rootTitle : (catalog.heading?.title ?? album?.name ?? ""));
   const parent = $derived.by((): { view: View; label: string } => {
     switch (view.kind) {
       case "person":
@@ -92,9 +109,11 @@
 </script>
 
 <header class="flex h-toolbar shrink-0 items-center gap-3 border-b border-line bg-canvas px-3" aria-label="Görünüm başlığı">
-  <button class="btn btn-ghost px-2" onclick={() => catalog.open(parent.view)} title={parent.label} aria-label="Geri: {parent.label}">
-    <ArrowLeft size={14} strokeWidth={1.5} />
-  </button>
+  {#if !root}
+    <button class="btn btn-ghost px-2" onclick={() => catalog.open(parent.view)} title={parent.label} aria-label="Geri: {parent.label}">
+      <ArrowLeft size={14} strokeWidth={1.5} />
+    </button>
+  {/if}
   <div class="flex min-w-0 flex-1 items-baseline gap-2">
     <h1 class="truncate text-sm font-medium text-ink">{title}</h1>
     {#if catalog.heading?.subtitle}<span class="truncate text-xs text-ink-3">{catalog.heading.subtitle}</span>{/if}
@@ -119,4 +138,5 @@
   {:else if view.kind === "smart_album"}
     <button class="btn" onclick={removeAlbum}><Trash size={14} strokeWidth={1.5} />Albümü sil</button>
   {/if}
+  <ArrangeMenu {catalog} />
 </header>

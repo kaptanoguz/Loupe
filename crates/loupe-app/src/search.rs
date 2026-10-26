@@ -575,12 +575,12 @@ pub fn palette(engine: &SearchEngine, cache: &RankCache, req: &PaletteRequest) -
     } else if text.is_some() {
         let ids = ranked_ids(engine, cache, &parsed.query)?;
         let view = View::Search { query: Box::new(parsed.query.clone()) };
-        let req = TimelineRequest { view, grouping: timeline::Grouping::Day, offset: 0, limit: preview };
+        let req = TimelineRequest { view, arrange: timeline::Arrange::default(), offset: 0, limit: preview };
         let slice = timeline::slice_ranked(engine.pool(), &req, Some(&ids))?;
         (ids.len() as u64, slice.items)
     } else {
         let view = View::Search { query: Box::new(parsed.query.clone()) };
-        let req = TimelineRequest { view, grouping: timeline::Grouping::Day, offset: 0, limit: preview };
+        let req = TimelineRequest { view, arrange: timeline::Arrange::default(), offset: 0, limit: preview };
         let slice = timeline::slice(engine.pool(), &req)?;
         (u64::from(slice.total), slice.items)
     };

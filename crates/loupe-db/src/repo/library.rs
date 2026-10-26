@@ -138,6 +138,35 @@ pub fn update_capabilities(
     Ok(())
 }
 
+/// Kütüphanenin en çok `limit` medya kaydını kataloğdan siler (diskteki
+/// dosyalara dokunulmaz). Yüzler, vektörler, küçük resim satırları ve işler
+/// şemayla gider; bulut durum satırları (RESTRICT) önce silinir. Silinen
+/// medya sayısını döner; 0 ise kütüphane boşalmıştır.
+pub fn remove_media_batch(conn: &mut Connection, id: LibraryId, limit: u32) -> Result<usize, DbError> {
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let batch = "SELECT id FROM media_files WHERE library_id = ?1 LIMIT ?2";
+    tx.execute(&format!("DELETE FROM sync_status WHERE media_id IN ({batch})"), params![id.0, limit])?;
+    let n = tx.execute(&format!("DELETE FROM media_files WHERE id IN ({batch})"), params![id.0, limit])?;
+    tx.commit()?;
+    Ok(n)
+}
+
+/// Medyası boşaltılmış kütüphaneyi siler; boş kalan isimsiz yüz kümelerini
+/// temizler ve birincil kütüphane gittiyse yönetilen ilk kütüphaneyi birincil yapar.
+pub fn remove_emptied(conn: &mut Connection, id: LibraryId) -> Result<bool, DbError> {
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let removed = tx.execute("DELETE FROM libraries WHERE id = ?1", [id.0])? > 0;
+    tx.execute("DELETE FROM face_clusters WHERE face_count <= 0 AND person_id IS NULL AND is_confirmed = 0", [])?;
+    tx.execute(
+        "UPDATE libraries SET is_primary = 1, updated_at = ?1
+          WHERE id = (SELECT id FROM libraries WHERE is_managed = 1 ORDER BY id LIMIT 1)
+            AND NOT EXISTS (SELECT 1 FROM libraries WHERE is_primary = 1)",
+        [now_ms()],
+    )?;
+    tx.commit()?;
+    Ok(removed)
+}
+
 /// Kütüphaneyi siler. İçinde medya kaydı varsa şema (ON DELETE RESTRICT) reddeder.
 pub fn delete(conn: &Connection, id: LibraryId) -> Result<bool, DbError> {
     Ok(conn.execute("DELETE FROM libraries WHERE id = ?1", [id.0])? > 0)

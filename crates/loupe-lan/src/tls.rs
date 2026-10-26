@@ -16,8 +16,9 @@ use std::sync::{Arc, RwLock};
 use rustls::client::WebPkiServerVerifier;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::crypto::{CryptoProvider, verify_tls12_signature, verify_tls13_signature};
-use rustls::server::WebPkiClientVerifier;
 use rustls::server::danger::{ClientCertVerified, ClientCertVerifier};
+use rustls::server::{ClientHello, ResolvesServerCert, WebPkiClientVerifier};
+use rustls::sign::CertifiedKey;
 use rustls::{
     CertificateError, ClientConfig, DigitallySignedStruct, DistinguishedName, Error, RootCertStore, ServerConfig,
     SignatureScheme,
@@ -25,7 +26,7 @@ use rustls::{
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
 
 use crate::identity::sha256;
-use crate::{LanError, SERVER_NAME, ServerIdentity};
+use crate::{LanError, SERVER_NAME, ServerIdentity, WebLeaf};
 
 const ALPN: [&[u8]; 2] = [b"h2", b"http/1.1"];
 
@@ -125,8 +126,45 @@ impl ClientCertVerifier for DeviceCertVerifier {
     }
 }
 
+/// SNI'ye göre sertifika: `<makine>.local` adıyla gelen Safari ve Kestirmeler,
+/// telefona kurulabilen ad kısıtlı CA'nın yaprağını alır. SNI'siz (IP ile)
+/// ya da [`SERVER_NAME`] ile gelen her bağlantı eskisi gibi eşleşme CA'sının
+/// sertifikasını alır: QR'daki parmak izi ve uygulama istemcileri değişmez.
+#[derive(Debug)]
+struct SniResolver {
+    app: Arc<CertifiedKey>,
+    web: Arc<CertifiedKey>,
+}
+
+impl ResolvesServerCert for SniResolver {
+    fn resolve(&self, hello: ClientHello<'_>) -> Option<Arc<CertifiedKey>> {
+        Some(match hello.server_name() {
+            Some(n) if n != SERVER_NAME && n.ends_with(".local") => self.web.clone(),
+            _ => self.app.clone(),
+        })
+    }
+}
+
+fn certified(
+    provider: &CryptoProvider,
+    chain: Vec<CertificateDer<'static>>,
+    key: &PrivateKeyDer<'static>,
+) -> Result<Arc<CertifiedKey>, LanError> {
+    let signing = provider.key_provider.load_private_key(key.clone_key())?;
+    Ok(Arc::new(CertifiedKey::new(chain, signing)))
+}
+
 /// Sunucu: TLS 1.3, ALPN h2 + http/1.1, zincir = sunucu sertifikası + CA.
 pub fn server_config(identity: &ServerIdentity, registry: Arc<DeviceRegistry>) -> Result<Arc<ServerConfig>, LanError> {
+    server_config_with_web(identity, registry, None)
+}
+
+/// [`server_config`] + SNI'si [`SERVER_NAME`] olmayan bağlantılar için `web` yaprağı.
+pub fn server_config_with_web(
+    identity: &ServerIdentity,
+    registry: Arc<DeviceRegistry>,
+    web: Option<&WebLeaf>,
+) -> Result<Arc<ServerConfig>, LanError> {
     let provider = provider();
     let mut roots = RootCertStore::empty();
     roots.add(identity.ca_cert().clone())?;
@@ -134,13 +172,17 @@ pub fn server_config(identity: &ServerIdentity, registry: Arc<DeviceRegistry>) -
         .allow_unauthenticated()
         .build()
         .map_err(builder_err)?;
-    let mut cfg = ServerConfig::builder_with_provider(provider)
+    let builder = ServerConfig::builder_with_provider(provider.clone())
         .with_protocol_versions(&[&rustls::version::TLS13])?
-        .with_client_cert_verifier(Arc::new(DeviceCertVerifier { chain, registry }))
-        .with_single_cert(
-            vec![identity.server_cert().clone(), identity.ca_cert().clone()],
-            identity.server_key_der(),
-        )?;
+        .with_client_cert_verifier(Arc::new(DeviceCertVerifier { chain, registry }));
+    let app_chain = vec![identity.server_cert().clone(), identity.ca_cert().clone()];
+    let mut cfg = match web {
+        None => builder.with_single_cert(app_chain, identity.server_key_der())?,
+        Some(w) => builder.with_cert_resolver(Arc::new(SniResolver {
+            app: certified(&provider, app_chain, &identity.server_key_der())?,
+            web: certified(&provider, w.chain.clone(), &w.key)?,
+        })),
+    };
     cfg.alpn_protocols = ALPN.iter().map(|p| p.to_vec()).collect();
     Ok(Arc::new(cfg))
 }

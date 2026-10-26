@@ -12,6 +12,7 @@
   import Settings from "./lib/components/Settings.svelte";
   import Sidebar from "./lib/components/Sidebar.svelte";
   import StatusBar from "./lib/components/StatusBar.svelte";
+  import TrashDialog from "./lib/components/TrashDialog.svelte";
   import ViewHeader from "./lib/components/ViewHeader.svelte";
   import WifiModal from "./lib/components/WifiModal.svelte";
   import { LayoutEngine } from "./lib/layout/engine";
@@ -89,25 +90,77 @@
     }
   }
 
-  async function startImport(mode: ImportMode): Promise<void> {
+  function importTarget(): number | null {
     const libs = catalog.sidebar?.libraries ?? [];
     const target = libs.find((l) => l.primary && l.managed && l.state === "online") ?? libs.find((l) => l.managed && l.state === "online");
-    if (!target) {
-      catalog.error = "Önce yönetilen bir kütüphane klasörü ekleyin (bağlı diskte).";
-      return;
-    }
+    if (!target) catalog.error = "Önce yönetilen bir kütüphane klasörü ekleyin (bağlı diskte).";
+    return target?.id ?? null;
+  }
+
+  async function startImport(mode: ImportMode): Promise<void> {
+    const libraryId = importTarget();
+    if (libraryId === null) return;
     try {
       const source = await backend.pickImportSource();
       if (!source) return;
-      track(await backend.startImport({ libraryId: target.id, source, mode }));
+      track(await backend.startImport({ libraryId, source, mode }));
     } catch (e) {
       fail(e);
+    }
+  }
+
+  /** Onaylanan fotoğrafları Çöp Kutusu'na taşır. */
+  async function trashMedia(ids: number[]): Promise<void> {
+    try {
+      const r = await backend.trashMedia(ids);
+      catalog.clearMarks();
+      void catalog.open(catalog.view);
+      void catalog.refreshSidebar();
+      if (r.failed.length > 0) catalog.error = `${r.trashed} fotoğraf taşındı · ${r.failed.length} taşınamadı: ${r.failed[0]?.reason}`;
+      else catalog.flash(`${r.trashed} fotoğraf Çöp Kutusu'na taşındı`);
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  /** Klasörü Loupe'den kaldırır; dosyalar diskte kalır. */
+  async function removeLibrary(id: number): Promise<void> {
+    try {
+      const removed = await backend.removeLibrary(id);
+      if (catalog.view.kind === "library" && catalog.view.id === id) void catalog.open({ kind: "all" });
+      else void catalog.open(catalog.view);
+      await catalog.refreshSidebar();
+      catalog.flash(`Klasör kaldırıldı · ${removed} kayıt (dosyalar diskte duruyor)`);
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  let searchingIphone = $state(false);
+
+  /** Kabloyla bağlı iPhone'un DCIM klasörünü kopyalar; aktarılmış olanlar özetle atlanır. */
+  async function importIphone(): Promise<void> {
+    const libraryId = importTarget();
+    if (libraryId === null || searchingIphone) return;
+    searchingIphone = true;
+    try {
+      const [phone] = await backend.findIphone();
+      if (!phone) {
+        catalog.error = "iPhone bulunamadı: kabloyla bağlayın, kilidini açın ve \"Bu bilgisayara güven\" deyin.";
+        return;
+      }
+      track(await backend.startImport({ libraryId, source: phone.dcim, mode: "copy" }));
+    } catch (e) {
+      fail(e);
+    } finally {
+      searchingIphone = false;
     }
   }
 
   const commands = $derived.by((): PaletteCommand[] => [
     { id: "verify", label: "Kütüphaneyi Doğrula (Bit-Rot)", hint: "BLAKE3 ile tüm dosyaları denetle" },
     { id: "wifi", label: "Wi-Fi Telefon Eşleştir", hint: "QR kodu göster, cihazları yönet" },
+    { id: "iphone", label: "iPhone'dan İçe Aktar", hint: "kabloyla bağlı iPhone'un fotoğraflarını kopyala" },
     { id: "cloud", label: "Bulut Senkronizasyonunu Başlat", hint: "şifreli yedeklemeyi şimdi çalıştır" },
     {
       id: "ai-pause",
@@ -132,6 +185,9 @@
         }
         case "wifi":
           catalog.overlay = "wifi";
+          break;
+        case "iphone":
+          await importIphone();
           break;
         case "cloud": {
           const st = await backend.startCloudSync();
@@ -188,9 +244,6 @@
   }
 
   const page = $derived(isPageView(catalog.view));
-  const headed = $derived(
-    ["search", "person", "cluster", "event", "smart_album"].includes(catalog.view.kind),
-  );
 </script>
 
 <svelte:window {onkeydown} />
@@ -198,14 +251,22 @@
 <div class="flex h-full flex-col bg-canvas text-ink">
   <div class="relative flex min-h-0 flex-1">
     <div class="relative flex min-w-0 flex-1">
-      <Sidebar {catalog} onAddFolder={addFolder} onImport={startImport} {importing} />
+      <Sidebar
+        {catalog}
+        onAddFolder={addFolder}
+        onImport={startImport}
+        onImportIphone={importIphone}
+        onRemoveLibrary={removeLibrary}
+        {searchingIphone}
+        {importing}
+      />
       {#if catalog.view.kind === "people"}
         <People {catalog} />
       {:else if catalog.view.kind === "events"}
         <Events {catalog} />
       {:else}
         <div class="flex min-w-0 flex-1 flex-col">
-          {#if headed}<ViewHeader {catalog} />{/if}
+          <ViewHeader {catalog} />
           <div class="flex min-h-0 flex-1">
             <Grid {catalog} engine={layoutEngine} onAddFolder={addFolder} />
           </div>
@@ -228,4 +289,6 @@
   <WifiModal {catalog} />
 {:else if catalog.overlay === "settings"}
   <Settings {catalog} />
+{:else if catalog.overlay === "trash"}
+  <TrashDialog {catalog} ids={catalog.targetIds()} onConfirm={trashMedia} />
 {/if}

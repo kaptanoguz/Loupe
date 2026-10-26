@@ -24,6 +24,8 @@ import type {
   ImageSize,
   ImportRequest,
   ImportSessionDto,
+  IphoneDto,
+  TrashResultDto,
   InspectorDetail,
   LibraryDto,
   PairingQrDto,
@@ -45,6 +47,9 @@ import type {
 export interface Backend {
   pickOrAddLibraryRoot(path?: string, name?: string, managed?: boolean): Promise<AddedLibrary | null>;
   pickImportSource(): Promise<string | null>;
+  findIphone(): Promise<IphoneDto[]>;
+  removeLibrary(id: number): Promise<number>;
+  trashMedia(ids: number[]): Promise<TrashResultDto>;
   listLibraries(): Promise<LibraryDto[]>;
   refreshLibraries(): Promise<LibraryDto[]>;
   startImport(req: ImportRequest): Promise<ImportSessionDto>;
@@ -142,6 +147,9 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 export const tauriBackend: Backend = {
   pickOrAddLibraryRoot: (path, name, managed) => call("pick_or_add_library_root", { path, name, managed }),
   pickImportSource: () => call("pick_import_source"),
+  findIphone: () => call("find_iphone"),
+  removeLibrary: (id) => call("remove_library", { id }),
+  trashMedia: (ids) => call("trash_media", { ids }),
   listLibraries: () => call("list_libraries"),
   refreshLibraries: () => call("refresh_libraries"),
   startImport: (req) => call("start_import", { req }),

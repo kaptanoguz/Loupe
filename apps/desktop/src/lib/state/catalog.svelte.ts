@@ -6,6 +6,7 @@
 import { DEFAULT_ZOOM, ROW_HEIGHTS, type ZoomLevel } from "../design/layout";
 import type { Backend } from "../api/backend";
 import type {
+  Arrange,
   CullRequest,
   Grouping,
   InspectorDetail,
@@ -43,15 +44,41 @@ export interface Heading {
   input?: string;
 }
 
-export type Overlay = "palette" | "wifi" | "settings" | null;
+export type Overlay = "palette" | "wifi" | "settings" | "trash" | null;
 export type SettingsTab = "cloud" | "encryption" | "verify" | "ai";
+
+export const DEFAULT_ARRANGE: Arrange = { sort: "taken", dir: "desc", grouping: "day" };
+const ARRANGE_KEY = "loupe.arrange";
+
+/** Tarihe göre olmayan sıralamalar kendi bölümlerini kurar; gruplama uygulanmaz. */
+export function groupable(a: Arrange): boolean {
+  return a.sort === "taken" || a.sort === "added";
+}
+
+function loadArrange(): Arrange {
+  try {
+    const raw = localStorage.getItem(ARRANGE_KEY);
+    if (!raw) return DEFAULT_ARRANGE;
+    const a = JSON.parse(raw) as Partial<Arrange>;
+    return {
+      sort: a.sort ?? DEFAULT_ARRANGE.sort,
+      dir: a.dir ?? DEFAULT_ARRANGE.dir,
+      grouping: a.grouping ?? DEFAULT_ARRANGE.grouping,
+    };
+  } catch {
+    return DEFAULT_ARRANGE;
+  }
+}
 
 /** Bilgi notu durum çubuğunda bu kadar kalır (ms). */
 export const NOTICE_MS = 4000;
 
 export class Catalog {
   view = $state<View>({ kind: "all" });
-  grouping = $state<Grouping>("day");
+  /** Sıralama ve yön; bölümleme `grouping`. */
+  sort = $state<Arrange["sort"]>(DEFAULT_ARRANGE.sort);
+  dir = $state<Arrange["dir"]>(DEFAULT_ARRANGE.dir);
+  grouping = $state<Grouping>(DEFAULT_ARRANGE.grouping);
   total = $state(0);
   loaded = $state(0);
   /** İlk dilim geldi mi (boş görünüm ile yükleniyor ayrımı). */
@@ -62,6 +89,10 @@ export class Catalog {
   /** En/boy oranları değiştiğinde artar → düzen yeniden hesaplanır. */
   aspectsRev = $state(0);
   selected = $state(-1);
+  /** Ctrl/Shift ile işaretlenen medya kimlikleri. Boşsa toplu işlemler seçili öğeye uygulanır. */
+  marked = $state.raw<ReadonlySet<number>>(new Set());
+  /** Shift ile aralık seçiminin başlangıcı. */
+  private anchor = -1;
   inspectorOpen = $state(true);
   loupeOpen = $state(false);
   loupeActual = $state(false);
@@ -90,6 +121,27 @@ export class Catalog {
 
   constructor(backend: Backend) {
     this.backend = backend;
+    const a = loadArrange();
+    this.sort = a.sort;
+    this.dir = a.dir;
+    this.grouping = a.grouping;
+  }
+
+  get arrange(): Arrange {
+    return { sort: this.sort, dir: this.dir, grouping: this.grouping };
+  }
+
+  /** Sıralama / yön / bölümlemeyi değiştirir, saklar ve görünümü yeniden açar. */
+  async setArrange(patch: Partial<Arrange>): Promise<void> {
+    const next = { ...this.arrange, ...patch };
+    this.sort = next.sort;
+    this.dir = next.dir;
+    try {
+      localStorage.setItem(ARRANGE_KEY, JSON.stringify(next));
+    } catch {
+      // Saklanamazsa bu oturumda geçerli kalır.
+    }
+    await this.open(this.view, next.grouping);
   }
 
   get targetRowHeight(): number {
@@ -107,6 +159,7 @@ export class Catalog {
     const same = sameView(view, this.view);
     const keepId = same ? this.selectedItem?.id : undefined;
     if (!same || heading) this.heading = heading;
+    if (!same) this.clearMarks();
     this.view = view;
     this.grouping = grouping;
     this.error = null;
@@ -126,7 +179,8 @@ export class Catalog {
       return;
     }
     try {
-      let first = await this.backend.timelineSlice({ view, grouping, offset: 0, limit: FIRST_PAGE });
+      const order = { sort: this.sort, dir: this.dir, grouping };
+      let first = await this.backend.timelineSlice({ view, ...order, offset: 0, limit: FIRST_PAGE });
       if (token !== this.loadToken) return;
       this.items = new Array(first.total);
       this.aspects = new Float32Array(first.total).fill(1.5);
@@ -149,7 +203,7 @@ export class Catalog {
           if (keep >= 0 || keepId === undefined) this.select(Math.max(0, keep));
         }
         if (this.loaded >= this.total || first.items.length === 0) break;
-        first = await this.backend.timelineSlice({ view, grouping, offset: this.loaded, limit: PAGE });
+        first = await this.backend.timelineSlice({ view, ...order, offset: this.loaded, limit: PAGE });
         if (token !== this.loadToken) return;
       }
       if (this.selected < 0 && this.total > 0) this.select(0);
@@ -194,6 +248,45 @@ export class Catalog {
     if (idx < 0 || idx >= this.total) return;
     this.selected = idx;
     this.scheduleDetail();
+  }
+
+  /** Fare tıklaması: Ctrl/⌘ ekler-çıkarır, Shift aralık seçer, düz tık işaretleri temizler. */
+  clickSelect(idx: number, mods: { toggle: boolean; range: boolean }): void {
+    const it = this.items[idx];
+    if (!it) return;
+    if (mods.range && this.anchor >= 0) {
+      const next = new Set(this.marked);
+      const [a, b] = this.anchor < idx ? [this.anchor, idx] : [idx, this.anchor];
+      for (let i = a; i <= b; i++) {
+        const x = this.items[i];
+        if (x) next.add(x.id);
+      }
+      this.marked = next;
+    } else if (mods.toggle) {
+      const next = new Set(this.marked);
+      // İlk Ctrl+tık, o an seçili olanı da işarete katar.
+      if (next.size === 0 && this.selectedItem && this.selectedItem.id !== it.id) next.add(this.selectedItem.id);
+      if (next.has(it.id)) next.delete(it.id);
+      else next.add(it.id);
+      this.marked = next;
+      this.anchor = idx;
+    } else {
+      this.clearMarks();
+      this.anchor = idx;
+    }
+    this.select(idx);
+  }
+
+  clearMarks(): void {
+    if (this.marked.size > 0) this.marked = new Set();
+    this.anchor = -1;
+  }
+
+  /** Toplu işlemlerin hedefi: işaretliler, yoksa seçili öğe. */
+  targetIds(): number[] {
+    if (this.marked.size > 0) return [...this.marked];
+    const it = this.selectedItem;
+    return it ? [it.id] : [];
   }
 
   private scheduleDetail(): void {
@@ -253,8 +346,21 @@ export class Catalog {
         this.loupeActual = !this.loupeActual;
         return true;
       case "close":
-        if (!this.loupeOpen) return false;
+        if (!this.loupeOpen) {
+          if (this.marked.size === 0) return false;
+          this.clearMarks();
+          return true;
+        }
         this.closeLoupe();
+        return true;
+      case "selectAll": {
+        const next = new Set<number>();
+        for (const it of this.items) if (it) next.add(it.id);
+        this.marked = next;
+        return true;
+      }
+      case "trash":
+        if (this.targetIds().length > 0) this.overlay = "trash";
         return true;
       case "zoom": {
         const z = Math.min(ROW_HEIGHTS.length - 1, Math.max(0, this.zoom + action.delta)) as ZoomLevel;

@@ -566,6 +566,137 @@ fn system_time(ms: i64) -> Option<std::time::SystemTime> {
     std::time::UNIX_EPOCH.checked_add(d)
 }
 
+/// Kestirmelerden tek istekle gelen dosyanın sonucu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WholeOutcome {
+    pub media_id: MediaId,
+    /// İçerik zaten katalogdaydı (aynı BLAKE3); dosya atıldı.
+    pub duplicate: bool,
+}
+
+/// Tek istekte kabul edilen en büyük dosya (uzun 4K video payı).
+pub const MAX_WHOLE_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+
+impl UploadService {
+    /// Kestirmeler tus konuşamaz ve özeti önceden hesaplayamaz: gövde tek
+    /// istekte gelir, akarken BLAKE3'lenir, sonra aynı atomik importer'la
+    /// kütüphaneye girer. Aynı içerik zaten varsa dosya atılır.
+    pub async fn receive_whole<S, E>(
+        &self,
+        name: Option<&str>,
+        modified_at_ms: Option<i64>,
+        body: S,
+    ) -> Result<WholeOutcome, LanError>
+    where
+        S: Stream<Item = Result<Bytes, E>> + Send,
+    {
+        let dir_name = new_upload_id();
+        let dir = self.staging.join(&dir_name);
+        tokio::fs::create_dir_all(&dir).await.map_err(LanError::io("staging dizini"))?;
+        let result = self.receive_into(&dir, name, modified_at_ms, body).await;
+        self.remove_staging(&format!("{dir_name}/"));
+        match &result {
+            Ok(_) => self.telemetry.verified(),
+            Err(_) => self.telemetry.failed(0),
+        }
+        result
+    }
+
+    async fn receive_into<S, E>(
+        &self,
+        dir: &Path,
+        name: Option<&str>,
+        modified_at_ms: Option<i64>,
+        body: S,
+    ) -> Result<WholeOutcome, LanError>
+    where
+        S: Stream<Item = Result<Bytes, E>> + Send,
+    {
+        let part = dir.join("gelen.part");
+        let mut file = tokio::fs::File::create(&part).await.map_err(LanError::io("staging dosyası"))?;
+        let (mut hasher, mut size, mut head) = (blake3::Hasher::new(), 0u64, Vec::with_capacity(32));
+        let mut body = std::pin::pin!(body);
+        while let Some(chunk) = body.next().await {
+            let chunk = chunk.map_err(|_| LanError::Aborted)?;
+            size += chunk.len() as u64;
+            if size > MAX_WHOLE_BYTES {
+                return Err(LanError::TooLarge);
+            }
+            if head.len() < 32 {
+                head.extend_from_slice(&chunk[..chunk.len().min(32 - head.len())]);
+            }
+            hasher.update(&chunk);
+            file.write_all(&chunk).await.map_err(LanError::io("staging yazma"))?;
+        }
+        if size == 0 {
+            return Err(LanError::BadRequest("boş gövde".into()));
+        }
+        file.sync_all().await.map_err(LanError::io("staging fsync"))?;
+        drop(file);
+        let digest = Blake3Hash(*hasher.finalize().as_bytes());
+        let filename = match name.map(sanitize_filename) {
+            Some(Ok(n)) if n.contains('.') => n,
+            _ => format!("IMG_{}.{}", &digest.to_hex()[..8], sniff_ext(&head)),
+        };
+        let path = dir.join(&filename);
+        tokio::fs::rename(&part, &path).await.map_err(LanError::io("staging adı"))?;
+        let (pool, importer) = (self.pool.clone(), self.importer.clone());
+        Self::blocking(move || {
+            if let Some(existing) = pool.read(|c| loupe_db::repo::media::find_by_blake3(c, &digest))? {
+                return Ok(WholeOutcome { media_id: existing, duplicate: true });
+            }
+            if let Some(ts) = modified_at_ms.and_then(system_time) {
+                let f = std::fs::File::options().write(true).open(&path).map_err(LanError::io("staging"))?;
+                f.set_modified(ts).map_err(LanError::io("staging mtime"))?;
+            }
+            let importer = importer.lock().map_err(|_| LanError::Join("importer kilidi zehirlendi".into()))?;
+            let mut catalog = PlainCatalog { pool: &pool };
+            Ok(match importer.import_file_as(&mut catalog, &path, ImportMode::Move, None, Placement::Lan)? {
+                ImportOutcome::Imported { media_id, .. } => WholeOutcome { media_id, duplicate: false },
+                ImportOutcome::Duplicate { existing, .. } => WholeOutcome { media_id: existing, duplicate: true },
+            })
+        })
+        .await
+    }
+}
+
+/// Dosya adı gelmediyse uzantı içerikten: JPEG, PNG, HEIC/HEIF, MOV, MP4.
+#[must_use]
+pub fn sniff_ext(head: &[u8]) -> &'static str {
+    if head.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        return "jpg";
+    }
+    if head.starts_with(b"\x89PNG") {
+        return "png";
+    }
+    match head.get(4..12) {
+        Some(b) if &b[..4] == b"ftyp" => match &b[4..8] {
+            b"heic" | b"heix" | b"hevc" | b"heim" | b"heis" => "heic",
+            b"mif1" | b"msf1" => "heif",
+            b"qt  " => "mov",
+            _ => "mp4",
+        },
+        _ => "bin",
+    }
+}
+
+/// Tek istekli yüklemelerin katalog tarafı: yalnızca medya satırı.
+struct PlainCatalog<'a> {
+    pool: &'a Pool,
+}
+
+impl ImportCatalog for PlainCatalog<'_> {
+    type Error = LanError;
+
+    fn find_by_blake3(&mut self, hash: &Blake3Hash) -> Result<Option<MediaId>, LanError> {
+        Ok(self.pool.read(|c| loupe_db::repo::media::find_by_blake3(c, hash))?)
+    }
+
+    fn commit_media(&mut self, media: &NewMediaFile) -> Result<CommitOutcome, LanError> {
+        write_tx(self.pool, |c| Ok(loupe_db::repo::media::insert(c, media)?))
+    }
+}
+
 /// Importer'ın katalog tarafı: medya satırı, `device_assets` ve oturumun
 /// tamamlanması tek `BEGIN IMMEDIATE` içinde.
 struct LanCatalog<'a> {

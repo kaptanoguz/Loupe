@@ -18,7 +18,7 @@ use loupe_core::{LibraryId, now_ms};
 use loupe_db::Pool;
 use loupe_lan::{
     AutoApprove, ConflictPolicy, Discovery, IdentityPem, LanConfig, LanServer, ServerIdentity, ServiceAd, SystemClock,
-    Telemetry,
+    Telemetry, WebCa, WebCaPem,
 };
 use serde::Serialize;
 use tokio::sync::Notify;
@@ -30,6 +30,7 @@ use crate::{AppError, AppResult};
 
 /// Secret deposundaki adlar.
 pub const LAN_IDENTITY_KEY: &str = "lan-identity";
+pub const LAN_WEB_CA_KEY: &str = "lan-web-ca";
 pub const AGE_DEVICE_KEY: &str = "age-device-key";
 /// Hedefler arası tekrar deneme aralığı (kuyruk boşken).
 pub const CLOUD_IDLE: Duration = Duration::from_secs(60);
@@ -81,6 +82,31 @@ pub fn load_or_create_identity(store: &dyn SecretStore, name: &str) -> AppResult
     let id = ServerIdentity::generate(name, now_ms())?;
     store.set(LAN_IDENTITY_KEY, &identity_to_json(&id.to_pem()))?;
     Ok(id)
+}
+
+/// Telefona profil olarak kurulan ad kısıtlı CA (Kestirmeler, Safari). Profil
+/// telefonda kaldığı sürece aynı kalmalıdır.
+pub fn load_or_create_web_ca(store: &dyn SecretStore) -> AppResult<WebCa> {
+    if let Some(saved) = store.get(LAN_WEB_CA_KEY)? {
+        let v: serde_json::Value =
+            serde_json::from_str(&saved).map_err(|e| AppError::Invalid(format!("LAN web CA: {e}")))?;
+        let f = |k: &str| v.get(k).and_then(serde_json::Value::as_str).map(str::to_owned).unwrap_or_default();
+        return Ok(WebCa::from_pem(&WebCaPem { ca_cert_pem: f("ca_cert_pem"), ca_key_pem: f("ca_key_pem") })?);
+    }
+    let ca = WebCa::generate(now_ms())?;
+    let p = ca.to_pem();
+    store.set(
+        LAN_WEB_CA_KEY,
+        &serde_json::json!({ "ca_cert_pem": p.ca_cert_pem, "ca_key_pem": p.ca_key_pem }).to_string(),
+    )?;
+    Ok(ca)
+}
+
+/// Makinenin mDNS adı (`<hostname>.local`); Kestirme adresi DHCP'den bağımsız kalsın.
+fn local_host_name() -> Option<String> {
+    let h = std::fs::read_to_string("/proc/sys/kernel/hostname").ok()?;
+    let h = h.trim();
+    (!h.is_empty() && h.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).then(|| format!("{h}.local"))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -442,9 +468,14 @@ impl Network {
         let start = |bind: SocketAddr| async move {
             let identity = load_or_create_identity(self.secrets.as_ref(), name)?;
             let importer = self.libraries.importer(lib)?;
+            let mut cfg = LanConfig::new(bind, lib, name);
+            // Web CA yoksa (gizli depo hatası) sunucu yine açılır; yalnızca profil sunulmaz.
+            cfg.web_ca = load_or_create_web_ca(self.secrets.as_ref()).ok().map(Arc::new);
+            cfg.web_hosts = local_host_name().into_iter().collect();
+            cfg.web_ips = local_addrs();
             // Eşleşme ancak masaüstünde QR gösterilince açılır (jeton yalnızca o an üretilir).
             let server = LanServer::start_shared(
-                LanConfig::new(bind, lib, name),
+                cfg,
                 self.pool.clone(),
                 identity,
                 importer,
@@ -704,6 +735,24 @@ impl Network {
             })?;
             Ok(rows.collect::<Result<_, _>>()?)
         })?)
+    }
+
+    /// LAN sunucusu bu kütüphaneye yazıyorsa durdurur (kütüphane kaldırılıyor).
+    /// Durdurduysa `true`; yeniden başlatmak çağıranın işidir.
+    pub async fn stop_lan_for(&self, lib: LibraryId) -> bool {
+        let mut slot = self.lan.lock().await;
+        if slot.as_ref().is_none_or(|s| s.library_id() != lib) {
+            return false;
+        }
+        if let Ok(mut d) = self.discovery.lock()
+            && let Some((disc, instance)) = d.take()
+        {
+            let _ignored = disc.withdraw(&instance);
+        }
+        if let Some(server) = slot.take() {
+            server.shutdown().await;
+        }
+        true
     }
 
     pub async fn shutdown(&self) {

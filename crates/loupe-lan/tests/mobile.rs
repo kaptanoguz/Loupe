@@ -22,7 +22,8 @@ use loupe_db::repo::{library, media};
 use loupe_db::{Pool, PoolConfig};
 use loupe_lan::web::{CSP, PrecheckItem, PrecheckResponse, SESSION_COOKIE, WebPairRequest, WebSession};
 use loupe_lan::{
-    AutoApprove, LanConfig, LanServer, ManualClock, PairingPayload, ServerIdentity, ServerPin, client_config,
+    AutoApprove, LanConfig, LanServer, ManualClock, PairingPayload, SERVER_NAME, ServerIdentity, ServerPin, WebCa,
+    client_config,
 };
 use loupe_storage::{Importer, ImporterConfig, LibraryMarker};
 use reqwest::{Client, RequestBuilder, StatusCode};
@@ -41,6 +42,10 @@ struct Desk {
 
 impl Desk {
     async fn start() -> Self {
+        Self::start_with(|_| {}).await
+    }
+
+    async fn start_with(tune: impl FnOnce(&mut LanConfig)) -> Self {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("Fotograflar");
         std::fs::create_dir_all(&root).unwrap();
@@ -72,8 +77,10 @@ impl Desk {
             })
             .unwrap();
         let importer = Importer::open(&root, ImporterConfig::new(lib)).unwrap();
+        let mut cfg = LanConfig::new(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0), lib, "Oğuz-Masaüstü");
+        tune(&mut cfg);
         let server = LanServer::start(
-            LanConfig::new(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0), lib, "Oğuz-Masaüstü"),
+            cfg,
             pool.clone(),
             ServerIdentity::generate("Oğuz-Masaüstü", *NOW).unwrap(),
             importer,
@@ -420,5 +427,116 @@ async fn serve_for_browser() {
     tokio::time::sleep(std::time::Duration::from_secs(secs)).await;
     let n: i64 = desk.pool.read(|c| Ok(c.query_row("SELECT count(*) FROM media_files", [], |r| r.get(0))?)).unwrap();
     println!("MEDIA_COUNT {n}");
+    desk.server.shutdown().await;
+}
+
+/// iPhone Kestirmesi: profil kurulmuş telefon web CA'ya güvenir ve sunucuya
+/// `<makine>.local` adıyla, sertifika uyarısı olmadan bağlanır. Uygulama
+/// istemcisi SNI = `loupe.local` ile eşleşme CA'sının sertifikasını almaya devam eder.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn shortcut_uploads_whole_files_over_profile_trusted_tls() {
+    const HOST: &str = "oguz-mint.local";
+    let ca = Arc::new(WebCa::generate(*NOW).unwrap());
+    let ca_for_cfg = ca.clone();
+    let desk = Desk::start_with(move |cfg| {
+        cfg.web_ca = Some(ca_for_cfg);
+        cfg.web_hosts = vec![HOST.to_owned()];
+    })
+    .await;
+    let addr = desk.server.local_addr();
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add(ca.cert().clone()).unwrap();
+    let mut tls = rustls::ClientConfig::builder_with_provider(loupe_lan::tls::provider())
+        .with_protocol_versions(&[&rustls::version::TLS13])
+        .unwrap()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    tls.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    let iphone = Client::builder().use_preconfigured_tls(tls).no_proxy().resolve(HOST, addr).build().unwrap();
+    let origin = format!("https://{HOST}:{}", addr.port());
+
+    // Profil herkese açıktır (gizli bilgi içermez) ve CA'yı taşır.
+    let res = iphone.get(format!("{origin}/m/loupe.mobileconfig")).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(header(&res, "content-type"), "application/x-apple-aspen-config");
+    assert!(res.text().await.unwrap().contains(&STANDARD.encode(ca.cert().as_ref())));
+
+    // Eşleşmiş tarayıcı Kestirme için ayrı anahtar alır.
+    let qr = desk.qr();
+    let session: WebSession = iphone
+        .post(format!("{origin}/m/session"))
+        .json(&WebPairRequest {
+            token: qr.token.clone(),
+            device_name: "iPhone (Safari)".into(),
+            platform: "ios".into(),
+        })
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let browser_key = session.session_key.unwrap();
+    assert_eq!(iphone.post(format!("{origin}/m/shortcut")).send().await.unwrap().status(), StatusCode::UNAUTHORIZED);
+    let sc: serde_json::Value = iphone
+        .post(format!("{origin}/m/shortcut"))
+        .bearer_auth(&browser_key)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(sc["path"], "/s/upload");
+    assert_eq!(sc["host"], HOST);
+    let key = sc["key"].as_str().unwrap().to_owned();
+    assert_ne!(key, browser_key);
+
+    // Gövde = dosyanın kendisi; ad yoksa içerikten türetilir.
+    let jpeg = photo(9, 200 * KIB);
+    let upload = |body: Vec<u8>, name: Option<&str>| {
+        let mut r = iphone.post(format!("{origin}/s/upload")).bearer_auth(&key).body(body);
+        if let Some(n) = name {
+            r = r.header("x-loupe-name", n);
+        }
+        r.send()
+    };
+    let res = upload(jpeg.clone(), None).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let saved: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(saved["status"], "saved");
+    let id = MediaId(saved["media_id"].as_i64().unwrap());
+    let m = desk.pool.read(|c| media::get(c, id)).unwrap().unwrap();
+    assert!(
+        m.original_filename.starts_with("IMG_") && m.original_filename.ends_with(".jpg"),
+        "{}",
+        m.original_filename
+    );
+    assert!(desk.root.join(m.rel_path.as_str()).is_file());
+
+    // Albüm yeniden gönderilirse aynı içerik atlanır.
+    let again: serde_json::Value = upload(jpeg, Some("IMG_0001.JPG")).await.unwrap().json().await.unwrap();
+    assert_eq!((again["status"].as_str(), again["media_id"].as_i64()), (Some("duplicate"), Some(id.0)));
+    let named: serde_json::Value =
+        upload(photo(10, 50 * KIB), Some("IMG_0002.HEIC.jpg")).await.unwrap().json().await.unwrap();
+    let m = desk.pool.read(|c| media::get(c, MediaId(named["media_id"].as_i64().unwrap()))).unwrap().unwrap();
+    assert_eq!(m.original_filename, "IMG_0002.HEIC.jpg");
+
+    // Anahtarsız ya da boş gövde reddedilir.
+    let res = iphone.post(format!("{origin}/s/upload")).body(vec![1u8, 2, 3]).send().await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(upload(Vec::new(), None).await.unwrap().status(), StatusCode::BAD_REQUEST);
+
+    // Uygulama istemcisi (SNI = loupe.local) ve IP ile gelen QR tarayıcısı
+    // eşleşme CA'sının sertifikasını almaya devam eder.
+    let app = Client::builder()
+        .use_preconfigured_tls(client_config(ServerPin::Leaf(qr.server_cert_sha256), None).unwrap())
+        .no_proxy()
+        .resolve(SERVER_NAME, addr)
+        .build()
+        .unwrap();
+    for url in [format!("https://{SERVER_NAME}:{}/m", addr.port()), format!("https://127.0.0.1:{}/m", addr.port())] {
+        assert_eq!(app.get(&url).send().await.unwrap().status(), StatusCode::OK, "{url}");
+    }
     desk.server.shutdown().await;
 }

@@ -109,6 +109,28 @@ async fn pick_import_source<R: Runtime>(app: tauri::AppHandle<R>) -> Cmd<Option<
     Ok(pick_folder(&app, "İçe aktarılacak klasör").await?.map(|p| p.display().to_string()))
 }
 
+/// Kabloyla bağlı iPhone'ların DCIM klasörleri (gerekirse bağlar; birkaç saniye sürebilir).
+#[tauri::command]
+async fn find_iphone() -> Cmd<Vec<loupe_app::iphone::IphoneDto>> {
+    Ok(tauri::async_runtime::spawn_blocking(loupe_app::iphone::find).await.unwrap_or_default())
+}
+
+/// Klasörü Loupe'den kaldırır (dosyalar diskte kalır). Kaldırılan kayıt sayısını döner.
+#[tauri::command]
+async fn remove_library(state: State<'_, Desktop>, id: i64) -> Cmd<u64> {
+    let (removed, lan_stopped) = state.core.remove_library(id).await?;
+    if lan_stopped {
+        start_network(state.core.clone());
+    }
+    Ok(removed)
+}
+
+/// Seçili fotoğrafları Çöp Kutusu'na taşır (arayüz önce onay ister).
+#[tauri::command]
+async fn trash_media(state: State<'_, Desktop>, ids: Vec<i64>) -> Cmd<loupe_app::trash::TrashResultDto> {
+    blocking(&state, move |c| c.trash_media(&ids)).await
+}
+
 #[tauri::command]
 async fn list_libraries(state: State<'_, Desktop>) -> Cmd<Vec<LibraryDto>> {
     blocking(&state, |c| c.libraries()).await
@@ -457,6 +479,9 @@ pub fn wire<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
         .invoke_handler(tauri::generate_handler![
             pick_or_add_library_root,
             pick_import_source,
+            find_iphone,
+            remove_library,
+            trash_media,
             list_libraries,
             refresh_libraries,
             start_import,

@@ -12,7 +12,7 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 use image::{Rgb, RgbImage};
 use loupe_app::search::PaletteRequest;
 use loupe_app::{
-    AiMode, AppConfig, AppCore, CloudTargetInput, Grouping, ImportRequest, ImportSessionDto, TimelineRequest, View,
+    AiMode, AppConfig, AppCore, Arrange, CloudTargetInput, ImportRequest, ImportSessionDto, TimelineRequest, View,
 };
 use loupe_jobs::{ResourceMode, WorkerConfig};
 use loupe_lan::MemoryDiscovery;
@@ -106,7 +106,7 @@ impl Fx {
     }
 
     fn slice(&self, view: View) -> loupe_app::TimelineSlice {
-        self.core.timeline_slice(&TimelineRequest { view, grouping: Grouping::Day, offset: 0, limit: 100 }).unwrap()
+        self.core.timeline_slice(&TimelineRequest { view, arrange: Arrange::default(), offset: 0, limit: 100 }).unwrap()
     }
 
     fn wait_ai(&self) {

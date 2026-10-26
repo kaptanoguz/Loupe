@@ -324,6 +324,50 @@ impl AppCore {
         self.libraries.list()
     }
 
+    /// Klasörü Loupe'den kaldırır: kataloğdaki kayıtları, yüzleri, vektörleri
+    /// ve işleri silinir; diskteki dosyalara dokunulmaz. Telefon aktarımı bu
+    /// kütüphaneye yazıyorsa LAN sunucusu durdurulur (`true` döner, çağıran
+    /// yeniden başlatır). İçe aktarma sürerken reddedilir.
+    pub async fn remove_library(self: &Arc<Self>, id: i64) -> AppResult<(u64, bool)> {
+        let lib = LibraryId(id);
+        let busy = self.pool.read(|c| {
+            Ok(c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM import_sessions WHERE library_id = ?1 AND state IN ('scanning','running'))",
+                [id],
+                |r| r.get::<_, bool>(0),
+            )?)
+        })?;
+        if busy {
+            return Err(AppError::Invalid("bu klasöre içe aktarma sürüyor; bitince kaldırın".into()));
+        }
+        let lan_stopped = self.network.stop_lan_for(lib).await;
+        let this = self.clone();
+        let removed = tokio::task::spawn_blocking(move || {
+            let n = this.libraries.remove(lib)?;
+            this.ranks.clear();
+            this.restart_watchers()?;
+            Ok::<_, AppError>(n)
+        })
+        .await
+        .map_err(|e| AppError::Join(e.to_string()))??;
+        Ok((removed, lan_stopped))
+    }
+
+    /// Seçili fotoğrafları diskten siler: Çöp Kutusu'na taşır ve kataloğdan çıkarır.
+    pub fn trash_media(&self, ids: &[i64]) -> AppResult<crate::trash::TrashResultDto> {
+        self.trash_media_with(ids, &crate::trash::GioTrash)
+    }
+
+    pub fn trash_media_with(
+        &self,
+        ids: &[i64],
+        trasher: &dyn crate::trash::Trasher,
+    ) -> AppResult<crate::trash::TrashResultDto> {
+        let out = crate::trash::trash_media(&self.pool, &self.libraries, trasher, ids)?;
+        self.ranks.clear();
+        Ok(out)
+    }
+
     /// Diskleri yeniden yoklar (disk takıldı/çıkarıldı).
     pub fn refresh_libraries(self: &Arc<Self>) -> AppResult<Vec<LibraryDto>> {
         let libs = self.libraries.refresh()?;
