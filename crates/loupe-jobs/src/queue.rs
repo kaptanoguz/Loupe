@@ -9,6 +9,8 @@
 //!   işlerini `Immediate` yapar; viewport değişince eski yükseltmeler geri alınır.
 //! - **Yeniden deneme:** geçici hata → `failed` + üstel geri çekilme;
 //!   `max_attempts` dolunca veya kalıcı hatada → `dead` (dead-letter).
+//!   Önkoşul bekleyen iş ([`JobError::waiting`]) deneme harcamadan `failed`
+//!   olarak [`RetryPolicy::wait`] sonra yeniden alınır.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Condvar, Mutex};
@@ -24,16 +26,18 @@ use crate::model::{Job, JobError, JobId, JobKind, JobRecord, JobState, NewJob, P
 /// Toplu eklemede transaction başına satır (loupe-db toplu import ile aynı).
 pub const ENQUEUE_BATCH: usize = 500;
 
-/// Üstel geri çekilme: `base · 2^(deneme−1)`, en çok `max`.
+/// Üstel geri çekilme: `base · 2^(deneme−1)`, en çok `max`. Önkoşul bekleyen
+/// iş ([`JobError::waiting`]) bunun yerine sabit `wait` aralığıyla denenir.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RetryPolicy {
     pub base: Duration,
     pub max: Duration,
+    pub wait: Duration,
 }
 
 impl Default for RetryPolicy {
     fn default() -> Self {
-        Self { base: Duration::from_secs(5), max: Duration::from_secs(3600) }
+        Self { base: Duration::from_secs(5), max: Duration::from_secs(3600), wait: Duration::from_secs(30) }
     }
 }
 
@@ -274,12 +278,14 @@ impl JobQueue {
                 return Ok(None);
             };
             let now = now_ms();
-            let dead = !err.retryable || attempts >= max_attempts;
-            let run_after =
-                now.saturating_add(i64::try_from(retry.delay(attempts).as_millis()).unwrap_or(i64::MAX / 2));
+            // Bekleyen iş: claim'in artırdığı deneme geri alınır.
+            let attempts = if err.waiting { attempts.saturating_sub(1) } else { attempts };
+            let dead = !err.retryable || (!err.waiting && attempts >= max_attempts);
+            let delay = if err.waiting { retry.wait } else { retry.delay(attempts) };
+            let run_after = now.saturating_add(i64::try_from(delay.as_millis()).unwrap_or(i64::MAX / 2));
             let state = if dead { JobState::Dead } else { JobState::Failed };
             conn.execute(
-                "UPDATE jobs SET state = ?2, run_after = ?3, lease_owner = NULL, lease_until = NULL,
+                "UPDATE jobs SET state = ?2, run_after = ?3, attempts = ?7, lease_owner = NULL, lease_until = NULL,
                         last_error_code = ?4, last_error_msg = ?5, updated_at = ?6
                   WHERE id = ?1",
                 params![
@@ -288,7 +294,8 @@ impl JobQueue {
                     if dead { now } else { run_after },
                     err.code,
                     truncate(&err.message),
-                    now
+                    now,
+                    attempts
                 ],
             )?;
             Ok(Some(state))
@@ -349,6 +356,26 @@ impl JobQueue {
                 AND media_id IN (SELECT id FROM media_files WHERE file_type = ?1)"
         );
         let mut values: Vec<rusqlite::types::Value> = vec![file_type.to_owned().into(), now_ms().into()];
+        values.extend(kinds.iter().map(|k| rusqlite::types::Value::from(k.as_str().to_owned())));
+        let n = self.pool.write(|conn| Ok(conn.execute(&sql, params_from_iter(values.iter()))?))?;
+        if n > 0 {
+            self.signal.notify();
+        }
+        Ok(n)
+    }
+
+    /// Belirli hata koduyla dead-letter'a düşmüş işleri sıfır denemeyle yeniden
+    /// kuyruğa koyar (ör. eski sürümlerde küçük resmi beklerken tükenen AI işleri).
+    pub fn retry_dead_with_code(&self, kinds: &[JobKind], code: &str) -> Result<usize, JobsError> {
+        if kinds.is_empty() {
+            return Ok(0);
+        }
+        let marks = (3..3 + kinds.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+        let sql = format!(
+            "UPDATE jobs SET state = 'pending', attempts = 0, run_after = ?2, updated_at = ?2
+              WHERE state = 'dead' AND kind IN ({marks}) AND last_error_code = ?1"
+        );
+        let mut values: Vec<rusqlite::types::Value> = vec![code.to_owned().into(), now_ms().into()];
         values.extend(kinds.iter().map(|k| rusqlite::types::Value::from(k.as_str().to_owned())));
         let n = self.pool.write(|conn| Ok(conn.execute(&sql, params_from_iter(values.iter()))?))?;
         if n > 0 {

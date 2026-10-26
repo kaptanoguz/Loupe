@@ -118,7 +118,7 @@ fn thumb_job(m: MediaId, variant: &str, p: Priority) -> NewJob {
 }
 
 fn fast_retry() -> RetryPolicy {
-    RetryPolicy { base: Duration::from_millis(20), max: Duration::from_millis(200) }
+    RetryPolicy { base: Duration::from_millis(20), max: Duration::from_millis(200), wait: Duration::from_secs(30) }
 }
 
 fn wait_until(timeout: Duration, mut cond: impl FnMut() -> bool) -> bool {
@@ -235,6 +235,39 @@ fn retry_with_exponential_backoff_then_dead_letter() {
     assert_eq!(q.retry_dead_for_file_type(&[JobKind::Thumb], "heic").unwrap(), 0);
     assert_eq!(q.retry_dead_for_file_type(&[JobKind::Thumb, JobKind::MetadataFull], "video").unwrap(), 1);
     assert_eq!(q.get(id2).unwrap().unwrap().state, JobState::Pending);
+}
+
+#[test]
+fn waiting_job_keeps_its_attempts_and_dead_code_revives() {
+    let e = env();
+    let m = e.numbered_media(2);
+    let q = JobQueue::with_retry(Arc::clone(&e.pool), fast_retry());
+    let lease = Duration::from_secs(60);
+    let clip = |m| NewJob::media(JobKind::ClipEmbed, m, "", Priority::Normal).with_max_attempts(2);
+
+    // Önkoşul bekleyen iş, deneme hakkından çok kez başarısız olsa da dead olmaz.
+    let id = q.enqueue(&clip(m[0])).unwrap();
+    let wait = JobError::waiting("NO_THUMB", "küçük resim yok");
+    for _ in 0..5 {
+        e.pool.write(|c| Ok(c.execute("UPDATE jobs SET run_after = 0 WHERE id = ?1", [id.0])?)).unwrap();
+        let j = q.claim("w", 9, lease).unwrap().unwrap();
+        assert_eq!((j.id, j.attempts), (id, 1));
+        assert_eq!(q.fail(id, "w", &wait).unwrap(), JobState::Failed);
+    }
+    let r = q.get(id).unwrap().unwrap();
+    assert_eq!((r.attempts, r.last_error_code.as_deref()), (0, Some("NO_THUMB")));
+    // Bekleme aralığı geri çekilmeden bağımsızdır (`RetryPolicy::wait`).
+    assert!(r.run_after >= loupe_core::now_ms() + 20_000);
+
+    // Eski sürümün tükettiği iş: koda göre diriltilir, başka kodlar dokunulmaz.
+    let id2 = q.enqueue(&clip(m[1])).unwrap();
+    q.claim("w", 9, lease).unwrap().unwrap();
+    assert_eq!(q.fail(id2, "w", &JobError::permanent("NO_THUMB", "eski")).unwrap(), JobState::Dead);
+    assert_eq!(q.retry_dead_with_code(&[JobKind::FaceDetect], "NO_THUMB").unwrap(), 0);
+    assert_eq!(q.retry_dead_with_code(&[JobKind::ClipEmbed], "DECODE").unwrap(), 0);
+    assert_eq!(q.retry_dead_with_code(&[JobKind::FaceDetect, JobKind::ClipEmbed], "NO_THUMB").unwrap(), 1);
+    let r = q.get(id2).unwrap().unwrap();
+    assert_eq!((r.state, r.attempts), (JobState::Pending, 0));
 }
 
 #[test]
@@ -434,7 +467,7 @@ fn pipeline_thumbnails_metadata_location_and_corrupt_file_goes_dead() {
     );
     let q = Arc::new(JobQueue::with_retry(
         Arc::clone(&e.pool),
-        RetryPolicy { base: Duration::from_secs(60), max: Duration::from_secs(60) },
+        RetryPolicy { base: Duration::from_secs(60), max: Duration::from_secs(60), wait: Duration::from_secs(60) },
     ));
 
     // Önce metadata (yönlendirme küçük resimden önce bilinsin), sonra küçük resimler.

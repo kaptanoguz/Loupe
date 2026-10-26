@@ -186,25 +186,35 @@ pub struct JobRecord {
 }
 
 /// İş işleyicisinin hatası. `retryable = false` ise iş doğrudan dead-letter'a gider.
+/// `waiting = true` ise iş bir önkoşulu bekliyordur (ör. küçük resim): deneme
+/// hakkı harcanmadan sabit bir aralıkla yeniden denenir.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{code}: {message}")]
 pub struct JobError {
     pub code: String,
     pub message: String,
     pub retryable: bool,
+    pub waiting: bool,
 }
 
 impl JobError {
     /// Geçici hata (disk takılı değil, kilit, ağ): geri çekilerek yeniden denenir.
     #[must_use]
     pub fn transient(code: &str, message: impl Into<String>) -> Self {
-        Self { code: code.to_owned(), message: message.into(), retryable: true }
+        Self { code: code.to_owned(), message: message.into(), retryable: true, waiting: false }
+    }
+
+    /// Önkoşul henüz hazır değil (başka bir iş sürüyor): deneme sayılmaz,
+    /// iş [`crate::RetryPolicy::wait`] sonra yeniden alınır.
+    #[must_use]
+    pub fn waiting(code: &str, message: impl Into<String>) -> Self {
+        Self { code: code.to_owned(), message: message.into(), retryable: true, waiting: true }
     }
 
     /// Kalıcı hata (bozuk dosya, desteklenmeyen biçim): yeniden denenmez.
     #[must_use]
     pub fn permanent(code: &str, message: impl Into<String>) -> Self {
-        Self { code: code.to_owned(), message: message.into(), retryable: false }
+        Self { code: code.to_owned(), message: message.into(), retryable: false, waiting: false }
     }
 }
 

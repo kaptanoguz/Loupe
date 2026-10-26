@@ -39,7 +39,7 @@ impl From<MediaError> for JobError {
             MediaError::InvalidCoordinate { .. } => "BAD_COORDINATE",
             MediaError::Tool { .. } => "TOOL",
         };
-        Self { code: code.to_owned(), message: e.to_string(), retryable: !e.is_permanent() }
+        Self { code: code.to_owned(), message: e.to_string(), retryable: !e.is_permanent(), waiting: false }
     }
 }
 

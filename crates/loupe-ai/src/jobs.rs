@@ -12,7 +12,7 @@ use image::RgbImage;
 use loupe_core::{MediaId, now_ms};
 use loupe_db::Pool;
 use loupe_db::repo::media;
-use loupe_jobs::{Job, JobContext, JobError, JobHandler, JobKind};
+use loupe_jobs::{Job, JobContext, JobError, JobHandler, JobKind, JobState, NewJob, Priority};
 use loupe_media::{ThumbCache, ThumbSize};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
@@ -263,12 +263,30 @@ impl JobHandler for AiJobHandler {
         if ctx.is_cancelled() {
             return Err(JobError::transient("CANCELLED", "havuz kapanıyor"));
         }
-        match job.kind {
+        let r = match job.kind {
             JobKind::FaceDetect => self.detect_faces(Self::media_id(job)?).map(|_| ()),
             JobKind::ClipEmbed => self.embed_clip(Self::media_id(job)?).map(|_| ()),
             JobKind::ClusterFaces => self.cluster_faces().map(|_| ()),
             JobKind::ClusterEvents => self.cluster_events().map(|_| ()),
             other => Err(JobError::permanent("UNSUPPORTED_KIND", format!("{other} bu işleyicide değil"))),
+        };
+        match r {
+            Err(e) if e.code == "NO_THUMB" => Err(Self::await_thumb(Self::media_id(job)?, ctx, e)),
+            r => r,
+        }
+    }
+}
+
+impl AiJobHandler {
+    /// Küçük resim önbellekte yok (henüz üretilmedi ya da önbellek temizlendi):
+    /// `md` üretimi kuyruğa konur ve iş deneme harcamadan onu bekler. Küçük
+    /// resim işi dead ise (çözülemeyen dosya) bekleme yerine normal hata döner.
+    fn await_thumb(id: MediaId, ctx: &JobContext<'_>, err: JobError) -> JobError {
+        let thumb = NewJob::media(JobKind::Thumb, id, ThumbSize::Md.as_str(), Priority::Background);
+        match ctx.enqueue(&thumb).and_then(|t| ctx.queue().get(t)) {
+            Ok(Some(t)) if t.state != JobState::Dead => JobError::waiting(&err.code, err.message),
+            Ok(_) => err,
+            Err(e) => JobError::transient("ENQUEUE", e.to_string()),
         }
     }
 }

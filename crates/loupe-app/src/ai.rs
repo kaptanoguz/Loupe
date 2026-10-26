@@ -205,6 +205,10 @@ pub const fn job_kinds() -> [JobKind; 4] {
 pub fn backfill(pool: &Pool, queue: &loupe_jobs::JobQueue, models: bool) -> AppResult<usize> {
     let mut jobs = vec![NewJob::global(JobKind::ClusterEvents, Priority::Idle)];
     if models {
+        // Eski sürümlerde küçük resim yokken (üretim sürerken ya da önbellek
+        // temizlenince) AI işleri deneme hakkını bitirip dead oluyordu; artık
+        // eksik küçük resmi kuyruğa koyup bekliyorlar, yeniden denenir.
+        queue.retry_dead_with_code(&[JobKind::FaceDetect, JobKind::ClipEmbed], "NO_THUMB")?;
         let ids: Vec<i64> = pool.read(|c| {
             Ok(c.prepare(
                 "SELECT m.id FROM media_files m LEFT JOIN media_ml_state s ON s.media_id = m.id
