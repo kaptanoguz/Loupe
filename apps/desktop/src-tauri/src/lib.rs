@@ -137,6 +137,12 @@ async fn open_media(state: State<'_, Desktop>, id: i64) -> Cmd<()> {
     blocking(&state, move |c| c.open_media(id)).await
 }
 
+/// Dosyanın klasörünü dosya yöneticisinde açar (dosya seçili). Döner: klasör.
+#[tauri::command]
+async fn reveal_media(state: State<'_, Desktop>, id: i64) -> Cmd<String> {
+    blocking(&state, move |c| c.reveal_media(id)).await
+}
+
 /// Seçili fotoğrafları Çöp Kutusu'na taşır (arayüz önce onay ister).
 #[tauri::command]
 async fn trash_media(state: State<'_, Desktop>, ids: Vec<i64>) -> Cmd<loupe_app::trash::TrashResultDto> {
@@ -495,6 +501,7 @@ pub fn wire<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             remove_library,
             update_library,
             open_media,
+            reveal_media,
             trash_media,
             list_libraries,
             refresh_libraries,

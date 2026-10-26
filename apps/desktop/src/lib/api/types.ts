@@ -7,6 +7,7 @@
 export type View =
   | { kind: "all" }
   | { kind: "favorites" }
+  | { kind: "videos" }
   | { kind: "library"; id: number }
   | { kind: "events" }
   | { kind: "people" }
@@ -17,7 +18,7 @@ export type View =
   | { kind: "cluster"; id: number }
   | { kind: "event"; id: number };
 
-export type ViewKey = "all" | "favorites" | "events" | "people" | "places";
+export type ViewKey = "all" | "favorites" | "videos" | "events" | "people" | "places";
 
 /** Tarih sıralamalarında bölümleme; `none` tek bölüm. */
 export type Grouping = "day" | "month" | "year" | "none";
@@ -59,6 +60,8 @@ export interface TileItem {
   flag: "none" | "pick" | "reject";
   raw: string | null;
   video: boolean;
+  /** Video süresi (ms). */
+  durationMs: number | null;
   sync: SyncState;
   takenAtUtc: number;
   tzOffsetMin: number | null;

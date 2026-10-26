@@ -7,6 +7,12 @@ import { LayoutEngine } from "./lib/layout/engine";
 
 // jsdom düzen hesaplamaz: ızgara kabına gerçekçi bir boyut verilir.
 beforeAll(() => {
+  // jsdom'da Web Animations yok; Svelte geçişleri (slayt gösterisi) anında biter.
+  Element.prototype.animate ??= function (this: Element) {
+    const a = { onfinish: null as (() => void) | null, cancel: () => {}, finished: Promise.resolve(), currentTime: 0 };
+    queueMicrotask(() => a.onfinish?.());
+    return a as unknown as Animation;
+  };
   Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => 1200 });
   Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: () => 800 });
   vi.stubGlobal(
@@ -97,5 +103,96 @@ describe("App", () => {
     await fireEvent.dblClick(tile);
     expect(screen.getByRole("dialog", { name: "Loupe" })).toBeTruthy();
     expect(container.querySelector(".tile.selected")?.getAttribute("data-idx")).toBe("2");
+  });
+
+  it("sağ tık menüsü: favoriye ekler, bulunduğu klasörü açar; çoklu seçimde hepsine uygular", async () => {
+    const { backend, container } = setup();
+    await waitFor(() => expect(container.querySelector(".tile[data-idx='4']")).toBeTruthy());
+    const tile = (i: number) => container.querySelector(`.tile[data-idx='${i}']`) as HTMLElement;
+    const before = backend.items[4]?.favorite;
+    await fireEvent.contextMenu(tile(4), { clientX: 100, clientY: 100 });
+    expect(tile(4).classList.contains("selected")).toBe(true);
+    let menu = screen.getByRole("menu", { name: "Fotoğraf menüsü" });
+    await fireEvent.click(within(menu).getByRole("menuitem", { name: /Bulunduğu klasörü aç/ }));
+    expect(screen.queryByRole("menu")).toBeNull();
+    await waitFor(() => expect(backend.revealed).toEqual([backend.items[4]?.id]));
+
+    await fireEvent.contextMenu(tile(4), { clientX: 100, clientY: 100 });
+    menu = screen.getByRole("menu");
+    await fireEvent.click(within(menu).getByRole("menuitem", { name: before ? /Favorilerden çıkar/ : /Favorilere ekle/ }));
+    await waitFor(() => expect(backend.items[4]?.favorite).toBe(!before));
+
+    // Ctrl ile iki karo işaretlenir; sağ tık seçimi korur, favori ikisine de uygulanır.
+    await fireEvent.click(tile(1));
+    await fireEvent.click(tile(2), { ctrlKey: true });
+    await fireEvent.contextMenu(tile(2), { clientX: 100, clientY: 100 });
+    menu = screen.getByRole("menu");
+    expect(menu.textContent).toContain("2 öğe seçili");
+    const on = !(backend.items[1]?.favorite && backend.items[2]?.favorite);
+    await fireEvent.click(within(menu).getByRole("menuitem", { name: on ? /Favorilere ekle/ : /Favorilerden çıkar/ }));
+    await waitFor(() => expect([backend.items[1]?.favorite, backend.items[2]?.favorite]).toEqual([on, on]));
+    // Esc menüyü kapatır.
+    await fireEvent.contextMenu(tile(2), { clientX: 100, clientY: 100 });
+    await fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("F tuşu ve Loupe'taki kalp düğmesi favoriyi değiştirir", async () => {
+    const { backend, container } = setup();
+    await waitFor(() => expect(container.querySelector(".tile.selected")).toBeTruthy());
+    const idx = Number(container.querySelector(".tile.selected")?.getAttribute("data-idx"));
+    const first = backend.items[idx]?.favorite ?? false;
+    await fireEvent.keyDown(window, { key: "f" });
+    await waitFor(() => expect(backend.items[idx]?.favorite).toBe(!first));
+    await fireEvent.keyDown(window, { key: " " });
+    const loupe = screen.getByRole("dialog", { name: "Loupe" });
+    await fireEvent.click(within(loupe).getByRole("button", { name: first ? "Favorilere ekle" : "Favorilerden çıkar" }));
+    await waitFor(() => expect(backend.items[idx]?.favorite).toBe(first));
+  });
+
+  it("slayt gösterisi: S başlatır, tam ekran olur, süre dolunca ilerler, oklar ve Esc", async () => {
+    const { backend, container } = setup();
+    const full = vi.spyOn(backend, "setFullscreen");
+    await waitFor(() => expect(container.querySelector(".tile.selected")).toBeTruthy());
+    const selected = () => container.querySelector(".tile.selected")?.getAttribute("data-idx");
+    const start = selected();
+    vi.useFakeTimers();
+    try {
+      await fireEvent.keyDown(window, { key: "s" });
+      const show = screen.getByRole("dialog", { name: "Slayt gösterisi" });
+      expect(full).toHaveBeenLastCalledWith(true);
+      expect(show.textContent).toContain("1 / 400");
+      await vi.advanceTimersByTimeAsync(5_100);
+      // Denetimler fare durunca gizlenir, kıpırdayınca görünür.
+      expect(within(show).queryByRole("button", { name: "Duraklat" })).toBeNull();
+      await fireEvent.mouseMove(show);
+      expect(show.textContent).toContain("2 / 400");
+      // Boşluk duraklatır: süre dolsa da ilerlemez.
+      await fireEvent.keyDown(window, { key: " " });
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(show.textContent).toContain("2 / 400");
+      await fireEvent.keyDown(window, { key: "ArrowLeft" });
+      await fireEvent.keyDown(window, { key: "ArrowLeft" });
+      expect(show.textContent).toContain("400 / 400");
+      await fireEvent.click(within(show).getByRole("button", { name: "3 sn" }));
+      expect(JSON.parse(localStorage.getItem("loupe.slideshow") ?? "{}").seconds).toBe(3);
+      await fireEvent.keyDown(window, { key: "Escape" });
+      expect(screen.queryByRole("dialog", { name: "Slayt gösterisi" })).toBeNull();
+      expect(full).toHaveBeenLastCalledWith(false);
+      expect(selected()).not.toBe(start);
+    } finally {
+      vi.useRealTimers();
+      localStorage.removeItem("loupe.slideshow");
+    }
+  });
+
+  it("Videolar bölümü yalnızca videoları süreleriyle gösterir", async () => {
+    const { backend, container } = setup();
+    const videos = backend.items.filter((i) => i.video).length;
+    await waitFor(() => expect(screen.getByRole("button", { name: /Videolar/ })).toBeTruthy());
+    await fireEvent.click(screen.getByRole("button", { name: /Videolar/ }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Videolar" })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("contentinfo", { name: "Durum" }).textContent).toContain(`${videos}`));
+    await waitFor(() => expect(container.querySelector(".tile[data-idx='0']")?.textContent).toMatch(/\d+:\d\d/));
   });
 });

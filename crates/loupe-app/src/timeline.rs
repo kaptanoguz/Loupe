@@ -22,6 +22,8 @@ pub const MAX_SLICE: u32 = 5_000;
 pub enum View {
     All,
     Favorites,
+    /// Yalnızca videolar.
+    Videos,
     Library {
         id: i64,
     },
@@ -164,6 +166,8 @@ pub struct TileItem {
     /// `NEF`, `CR2`, `ARW`… ya da `DNG`; JPEG/HEIC için yok.
     pub raw: Option<String>,
     pub video: bool,
+    /// Video süresi (ms); fotoğrafta ya da süre okunamadıysa yok.
+    pub duration_ms: Option<i64>,
     /// `local` | `queued` | `synced` | `error` | `offline`
     pub sync: &'static str,
     pub taken_at_utc: i64,
@@ -256,6 +260,7 @@ fn plan(conn: &Connection, view: &View, arrange: Arrange, ranked: Option<&[i64]>
     Ok(match view {
         View::All => by_date(base, Vec::new()),
         View::Favorites => by_date(format!("{base} AND m.is_favorite = 1"), Vec::new()),
+        View::Videos => by_date(format!("{base} AND m.file_type = 'video'"), Vec::new()),
         View::Library { id } => by_date(format!("{base} AND m.library_id = ?1"), vec![Value::Integer(*id)]),
         // Metinli sorgular `ranked` ile gelir; burada yalnızca süzgeçler.
         View::SmartAlbum { id } => {
@@ -447,7 +452,8 @@ const ITEM_COLS: &str = "m.id, m.blake3, m.width, m.height, m.orientation, m.rat
                  WHEN sum(s.state IN ('error','conflict')) > 0 THEN 'error'
                  WHEN sum(s.state <> 'synced') = 0 THEN 'synced'
                  ELSE 'queued' END
-       FROM sync_status s WHERE s.media_id = m.id)";
+       FROM sync_status s WHERE s.media_id = m.id),
+    m.duration_ms";
 
 fn items(conn: &Connection, p: &Plan, offset: u32, limit: u32) -> AppResult<Vec<TileItem>> {
     let n = p.params.len();
@@ -472,6 +478,7 @@ fn items(conn: &Connection, p: &Plan, offset: u32, limit: u32) -> AppResult<Vec<
             flag: r.get(8)?,
             raw: raw.or_else(|| (file_type == "dng").then(|| "DNG".to_owned())),
             video: file_type == "video",
+            duration_ms: r.get(15)?,
             sync: if lib_state.as_deref() != Some("online") {
                 "offline"
             } else {

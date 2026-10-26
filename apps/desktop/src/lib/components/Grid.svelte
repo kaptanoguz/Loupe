@@ -18,6 +18,7 @@
     favorite: boolean;
     raw: string | null;
     video: boolean;
+    duration: number | null;
     sync: SyncState;
   }
 
@@ -36,6 +37,7 @@
     favorite: false,
     raw: null,
     video: false,
+    duration: null,
     sync: "local",
   };
 
@@ -183,6 +185,7 @@
         favorite: item?.favorite ?? false,
         raw: item?.raw ?? null,
         video: item?.video ?? false,
+        duration: item?.durationMs ?? null,
         sync: item?.sync ?? "local",
       };
     }
@@ -225,6 +228,17 @@
     if (idx >= 0) catalog.clickSelect(idx, { toggle: e.ctrlKey || e.metaKey, range: e.shiftKey });
   }
 
+  /** Sağ tık: işaretli olmayan karo tek başına seçilir, işaretliyse seçim korunur. */
+  function oncontextmenu(e: MouseEvent): void {
+    const idx = hit(e);
+    if (idx < 0) return;
+    e.preventDefault();
+    const it = catalog.items[idx];
+    if (it && catalog.marked.has(it.id)) catalog.select(idx);
+    else catalog.clickSelect(idx, { toggle: false, range: false });
+    catalog.menu = { x: e.clientX, y: e.clientY };
+  }
+
   function ondblclick(e: MouseEvent): void {
     const idx = hit(e);
     if (idx < 0) return;
@@ -259,7 +273,7 @@
     </div>
   {:else if layout}
     <!-- svelte-ignore a11y_click_events_have_key_events (klavye: App.svelte genel kısayolları) -->
-    <div class="relative" style:height="{layout.height + PAD}px" {onclick} {ondblclick} role="presentation">
+    <div class="relative" style:height="{layout.height + PAD}px" {onclick} {ondblclick} {oncontextmenu} role="presentation">
       {#each headers as s (s)}
         {@const sec = catalog.sections[s]}
         {#if sec}
@@ -291,6 +305,7 @@
           favorite={s.favorite}
           raw={s.raw}
           video={s.video}
+          duration={s.duration}
           sync={s.sync}
         />
       {/each}

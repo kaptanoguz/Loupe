@@ -17,7 +17,8 @@ export type Action =
   | { type: "zoom"; delta: 1 | -1 }
   | { type: "palette" }
   | { type: "selectAll" }
-  | { type: "trash" };
+  | { type: "trash" }
+  | { type: "slideshow" };
 
 /** 6–9: kırmızı, sarı, yeşil, mavi (Lightroom sırası). */
 export const DIGIT_LABELS: Record<string, ColorLabel> = { "6": "red", "7": "yellow", "8": "green", "9": "blue" };
@@ -68,6 +69,9 @@ export function keyToAction(e: KeyLike, ctx: KeyContext): Action | null {
     case "f":
     case "F":
       return { type: "favorite" };
+    case "s":
+    case "S":
+      return { type: "slideshow" };
     case "i":
     case "I":
       return { type: "inspector" };

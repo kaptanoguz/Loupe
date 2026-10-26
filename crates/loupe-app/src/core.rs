@@ -4,6 +4,7 @@
 
 use std::borrow::Cow;
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 
@@ -64,7 +65,7 @@ pub struct StatusDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewCount {
-    /// `all` | `favorites` | `events` | `people` | `places`
+    /// `all` | `favorites` | `videos` | `events` | `people` | `places`
     pub key: &'static str,
     /// Tümü/Favoriler: fotoğraf; Etkinlik/Kişi/Yer: grup sayısı.
     pub count: u64,
@@ -369,22 +370,46 @@ impl AppCore {
 
     /// Medyayı sistemin varsayılan uygulamasında açar (video oynatıcı vb.).
     pub fn open_media(&self, id: i64) -> AppResult<()> {
+        let path = self.media_file(id)?;
+        spawn_detached("xdg-open", &[path.as_os_str()])
+    }
+
+    /// Dosyanın klasörünü dosya yöneticisinde açar ve dosyayı seçili gösterir
+    /// (`org.freedesktop.FileManager1.ShowItems`: Nemo, Nautilus, Dolphin…);
+    /// bu servis yoksa klasörü `xdg-open` ile açar. Döner: klasör yolu.
+    pub fn reveal_media(&self, id: i64) -> AppResult<String> {
+        let path = self.media_file(id)?;
+        let dir = path.parent().map(Path::to_path_buf).unwrap_or_else(|| path.clone());
+        let shown = std::process::Command::new("dbus-send")
+            .args([
+                "--session",
+                "--print-reply",
+                "--reply-timeout=3000",
+                "--dest=org.freedesktop.FileManager1",
+                "--type=method_call",
+                "/org/freedesktop/FileManager1",
+                "org.freedesktop.FileManager1.ShowItems",
+            ])
+            .arg(format!("array:string:{}", file_uri(&path)))
+            .arg("string:")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        if !shown {
+            spawn_detached("xdg-open", &[dir.as_os_str()])?;
+        }
+        Ok(dir.to_string_lossy().into_owned())
+    }
+
+    /// Medyanın diskteki yolu (kütüphanesi bağlı olmalı).
+    fn media_file(&self, id: i64) -> AppResult<PathBuf> {
         let m = self
             .pool
             .read(|c| loupe_db::repo::media::get(c, MediaId(id)))?
             .ok_or_else(|| AppError::Invalid(format!("medya {id} yok")))?;
-        let path = self
-            .libraries
-            .media_path(&m)?
-            .ok_or_else(|| AppError::LibraryOffline("dosyanın diski bağlı değil".into()))?;
-        std::process::Command::new("xdg-open")
-            .arg(&path)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .map_err(AppError::io("xdg-open çalıştırılamadı"))?;
-        Ok(())
+        self.libraries.media_path(&m)?.ok_or_else(|| AppError::LibraryOffline("dosyanın diski bağlı değil".into()))
     }
 
     /// Seçili fotoğrafları diskten siler: Çöp Kutusu'na taşır ve kataloğdan çıkarır.
@@ -799,6 +824,7 @@ impl AppCore {
             views: vec![
                 ViewCount { key: "all", count: timeline::count(&self.pool, &View::All)? },
                 ViewCount { key: "favorites", count: timeline::count(&self.pool, &View::Favorites)? },
+                ViewCount { key: "videos", count: timeline::count(&self.pool, &View::Videos)? },
                 ViewCount { key: "events", count: groups.0 },
                 ViewCount { key: "people", count: groups.1 },
                 ViewCount { key: "places", count: groups.2 },
@@ -835,5 +861,45 @@ fn to_db(e: AppError) -> loupe_db::DbError {
     match e {
         AppError::Db(d) => d,
         other => loupe_db::DbError::Validation(other.to_string()),
+    }
+}
+
+/// Programı arka planda başlatır; çıktısı yok sayılır.
+fn spawn_detached(program: &str, args: &[&std::ffi::OsStr]) -> AppResult<()> {
+    std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(AppError::io(format!("{program} çalıştırılamadı")))?;
+    Ok(())
+}
+
+/// `file://` URI'si: yol baytları yüzde kodlanır (`dbus-send` virgülü dizi
+/// ayırıcısı sayar; virgül de kodlanır).
+fn file_uri(path: &Path) -> String {
+    use std::os::unix::ffi::OsStrExt;
+    let mut out = String::from("file://");
+    for &b in path.as_os_str().as_bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'/' | b'-' | b'_' | b'.' | b'~') {
+            out.push(char::from(b));
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_uri_escapes_spaces_commas_and_utf8() {
+        assert_eq!(
+            file_uri(Path::new("/media/Data/Tatil, 2024/Göreme 1.jpg")),
+            "file:///media/Data/Tatil%2C%202024/G%C3%B6reme%201.jpg"
+        );
     }
 }

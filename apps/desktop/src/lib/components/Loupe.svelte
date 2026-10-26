@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Heart from "@lucide/svelte/icons/heart";
   import Play from "@lucide/svelte/icons/play";
 
   import { THUMB_RETRIES, THUMB_RETRY_MS } from "../design/layout";
@@ -13,13 +14,8 @@
 
   const item = $derived(catalog.selectedItem);
 
-  async function play(): Promise<void> {
-    if (!item) return;
-    try {
-      await catalog.backend.openMedia(item.id);
-    } catch (e) {
-      catalog.fail(e);
-    }
+  function play(): void {
+    if (item) void catalog.openExternal(item.id);
   }
   // Izgarada zaten yüklenmiş küçük boyut anında görünür; lg gelince üstüne geçer.
   const low = $derived(item ? catalog.backend.thumbUrl("sm", item.hash) : "");
@@ -151,6 +147,10 @@
     {onpointermove}
     {onpointerup}
     {onwheel}
+    oncontextmenu={(e) => {
+      e.preventDefault();
+      catalog.menu = { x: e.clientX, y: e.clientY };
+    }}
     role="presentation"
   >
     {#if item}
@@ -196,7 +196,18 @@
     <span>
       {#if item}{count(catalog.selected + 1)} / {count(catalog.total)}{/if}
     </span>
-    <span>
+    <span class="flex items-center gap-2">
+      {#if item}
+        <button
+          class="flex items-center gap-1 hover:text-ink {item.favorite ? 'text-ink' : ''}"
+          title="Favori (F)"
+          aria-label={item.favorite ? "Favorilerden çıkar" : "Favorilere ekle"}
+          aria-pressed={item.favorite}
+          onclick={() => catalog.toggleFavorite([item.id])}
+        >
+          <Heart size={12} strokeWidth={1.5} class={item.favorite ? "fill-ink" : ""} />{item.favorite ? "favori" : "F favori"}
+        </button>
+      {/if}
       {#if item && item.rating > 0}<span class="text-ink">{"★".repeat(item.rating)}</span>{/if}
     </span>
     <span>
@@ -204,7 +215,7 @@
       {#if catalog.loupeActual}
         · {full ? `${full.w}×${full.h}` : origFailed ? "önizleme (özgün açılamadı)" : "özgün yükleniyor"}
       {/if}
-      · {percent}% · Z yakınlaştır · Esc kapat
+      · {percent}% · Z yakınlaştır · S slayt · Esc kapat
     </span>
   </div>
 </div>

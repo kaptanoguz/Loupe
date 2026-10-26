@@ -1,6 +1,8 @@
 <script lang="ts">
   import Check from "@lucide/svelte/icons/check";
   import Copy from "@lucide/svelte/icons/copy";
+  import FolderOpen from "@lucide/svelte/icons/folder-open";
+  import Heart from "@lucide/svelte/icons/heart";
 
   import type { InspectorDetail } from "../api/types";
   import { LABEL_BG, LABEL_NAME } from "../design/labels";
@@ -9,9 +11,11 @@
 
   interface Props {
     detail: InspectorDetail | null;
+    onFavorite?: (id: number) => void;
+    onReveal?: (id: number) => void;
   }
 
-  let { detail }: Props = $props();
+  let { detail, onFavorite, onReveal }: Props = $props();
   let copied = $state(false);
 
   const SYNC_TEXT: Record<string, string> = {
@@ -83,7 +87,22 @@
           {:else}—{/if}
         </dd>
         <dt>Favori</dt>
-        <dd>{detail.favorite ? "evet" : "hayır"}</dd>
+        <dd class="flex justify-end">
+          {#if onFavorite}
+            {@const id = detail.id}
+            <button
+              class="flex items-center gap-1 hover:text-ink"
+              title="Favori (F)"
+              aria-label={detail.favorite ? "Favorilerden çıkar" : "Favorilere ekle"}
+              aria-pressed={detail.favorite}
+              onclick={() => onFavorite(id)}
+            >
+              <Heart size={12} strokeWidth={1.5} class={detail.favorite ? "fill-ink" : ""} />{detail.favorite
+                ? "evet"
+                : "ekle"}
+            </button>
+          {:else}{detail.favorite ? "evet" : "hayır"}{/if}
+        </dd>
       </dl>
     </section>
 
@@ -106,6 +125,12 @@
       <p class="data truncate text-2xs text-ink-3" title={detail.path ?? detail.relPath}>
         {detail.path ?? detail.relPath}
       </p>
+      {#if onReveal}
+        {@const id = detail.id}
+        <button class="btn mt-2 h-6 text-xs" onclick={() => onReveal(id)}
+          ><FolderOpen size={12} strokeWidth={1.5} />Bulunduğu klasörü aç</button
+        >
+      {/if}
       <dl class="kv mt-2 gap-y-1">
         <dt>Boyut</dt>
         <dd>{bytes(detail.sizeBytes)}</dd>

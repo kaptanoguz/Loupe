@@ -4,6 +4,7 @@
   import type { ColorLabel, SyncState } from "../api/types";
   import { LABEL_BG } from "../design/labels";
   import { THUMB_RETRIES, THUMB_RETRY_MS } from "../design/layout";
+  import { clock } from "../format";
 
   interface Props {
     idx: number;
@@ -20,10 +21,12 @@
     favorite: boolean;
     raw: string | null;
     video: boolean;
+    /** Video süresi (ms). */
+    duration: number | null;
     sync: SyncState;
   }
 
-  let { idx, src, x, y, w, h, selected, ready, rating, label, favorite, raw, video, sync }: Props = $props();
+  let { idx, src, x, y, w, h, selected, ready, rating, label, favorite, raw, video, duration, sync }: Props = $props();
   /** Küçük karolarda göstergeler kalabalık etmesin. */
   const compact = $derived(h < 100 || w < 90);
 
@@ -70,7 +73,7 @@
     {/if}
     {#if (raw || video) && !compact}
       <span class="data hairline scrim absolute top-1 right-1 h-4 px-1 text-2xs leading-3.5 text-ink-2">
-        {video ? "VID" : raw}
+        {video ? (duration ? clock(duration / 1000) : "VID") : raw}
       </span>
     {/if}
     {#if label}

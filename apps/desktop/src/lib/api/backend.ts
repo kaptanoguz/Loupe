@@ -4,6 +4,7 @@
  * bilmez.
  */
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { MockBackend } from "./mock";
 import type {
@@ -57,6 +58,10 @@ export interface Backend {
   updateLibrary(id: number, patch: LibraryPatch): Promise<LibraryDto>;
   /** Medyayı sistemin varsayılan uygulamasında açar (video oynatıcı). */
   openMedia(id: number): Promise<void>;
+  /** Dosyanın klasörünü dosya yöneticisinde açar. Döner: klasör yolu. */
+  revealMedia(id: number): Promise<string>;
+  /** Pencereyi tam ekrana alır ya da çıkarır (slayt gösterisi). */
+  setFullscreen(on: boolean): Promise<void>;
   importStatus(id: number): Promise<ImportSessionDto>;
   recentImports(limit?: number): Promise<ImportSessionDto[]>;
   cancelImport(id: number): Promise<boolean>;
@@ -159,6 +164,14 @@ export const tauriBackend: Backend = {
   startImport: (req) => call("start_import", { req }),
   updateLibrary: (id, patch) => call("update_library", { id, patch }),
   openMedia: (id) => call("open_media", { id }),
+  revealMedia: (id) => call("reveal_media", { id }),
+  setFullscreen: async (on) => {
+    try {
+      await getCurrentWindow().setFullscreen(on);
+    } catch {
+      // Tam ekran olmadan da gösteri sürer.
+    }
+  },
   importStatus: (id) => call("import_status", { id }),
   recentImports: (limit) => call("recent_imports", { limit }),
   cancelImport: (id) => call("cancel_import", { id }),

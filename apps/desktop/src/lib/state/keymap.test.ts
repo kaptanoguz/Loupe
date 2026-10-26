@@ -16,6 +16,7 @@ const item: TileItem = {
   flag: "none",
   raw: null,
   video: false,
+  durationMs: null,
   sync: "local",
   takenAtUtc: 0,
   tzOffsetMin: null,
@@ -41,6 +42,7 @@ describe("keyToAction", () => {
 
   it("F, I, Space, Esc, Z", () => {
     expect(keyToAction({ key: "f" }, grid)).toEqual({ type: "favorite" });
+    expect(keyToAction({ key: "s" }, grid)).toEqual({ type: "slideshow" });
     expect(keyToAction({ key: "I" }, grid)).toEqual({ type: "inspector" });
     expect(keyToAction({ key: " " }, grid)).toEqual({ type: "loupe" });
     expect(keyToAction({ key: " " }, loupe)).toEqual({ type: "loupe" });
