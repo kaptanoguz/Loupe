@@ -10,6 +10,7 @@ import { MockBackend } from "./mock";
 import type {
   AddedLibrary,
   AiStatusDto,
+  AlbumDto,
   ModelsDto,
   AppErrorDto,
   CloudSettingsDto,
@@ -75,6 +76,12 @@ export interface Backend {
   searchPalette(req: PaletteRequest): Promise<PaletteResult>;
   saveSmartAlbum(name: string, query: SearchQuery, pinned?: boolean): Promise<SmartAlbumDto>;
   deleteSmartAlbum(id: number): Promise<void>;
+  createAlbum(name: string): Promise<AlbumDto>;
+  renameAlbum(id: number, name: string): Promise<AlbumDto>;
+  deleteAlbum(id: number): Promise<void>;
+  /** Döner: yeni eklenen sayısı (zaten albümde olanlar atlanır). */
+  addToAlbum(id: number, ids: number[]): Promise<number>;
+  removeFromAlbum(id: number, ids: number[]): Promise<number>;
 
   listPeople(): Promise<PeopleDto>;
   personFaces(target: { person?: number; cluster?: number }, limit?: number): Promise<FaceRef[]>;
@@ -185,6 +192,11 @@ export const tauriBackend: Backend = {
   searchPalette: (req) => call("search_palette", { req }),
   saveSmartAlbum: (name, query, pinned) => call("save_smart_album", { name, query, pinned }),
   deleteSmartAlbum: (id) => call("delete_smart_album", { id }),
+  createAlbum: (name) => call("create_album", { name }),
+  renameAlbum: (id, name) => call("rename_album", { id, name }),
+  deleteAlbum: (id) => call("delete_album", { id }),
+  addToAlbum: (id, ids) => call("add_to_album", { id, ids }),
+  removeFromAlbum: (id, ids) => call("remove_from_album", { id, ids }),
 
   listPeople: () => call("list_people"),
   personFaces: (target, limit) => call("person_faces", { person: target.person, cluster: target.cluster, limit }),

@@ -13,6 +13,7 @@ export type View =
   | { kind: "people" }
   | { kind: "places" }
   | { kind: "smart_album"; id: number }
+  | { kind: "album"; id: number }
   | { kind: "search"; query: SearchQuery }
   | { kind: "person"; id: number }
   | { kind: "cluster"; id: number }
@@ -257,6 +258,14 @@ export interface SidebarDto {
   libraries: LibraryDto[];
   views: { key: ViewKey; count: number }[];
   smartAlbums: SmartAlbumDto[];
+  albums: AlbumDto[];
+}
+
+/** Elle oluşturulan albüm. */
+export interface AlbumDto {
+  id: number;
+  name: string;
+  mediaCount: number;
 }
 
 export interface LanStatusDto {

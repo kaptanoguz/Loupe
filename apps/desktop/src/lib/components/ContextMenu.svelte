@@ -1,8 +1,10 @@
 <script lang="ts">
+  import BookmarkPlus from "@lucide/svelte/icons/bookmark-plus";
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import Heart from "@lucide/svelte/icons/heart";
   import Maximize from "@lucide/svelte/icons/maximize";
+  import Minus from "@lucide/svelte/icons/minus";
   import Play from "@lucide/svelte/icons/play";
   import Presentation from "@lucide/svelte/icons/presentation";
   import Trash from "@lucide/svelte/icons/trash";
@@ -31,6 +33,7 @@
   const ids = $derived(catalog.targetIds());
   const many = $derived(ids.length > 1);
   const fav = $derived(catalog.allFavorite(ids));
+  const album = $derived(catalog.view.kind === "album");
 
   const entries = $derived.by((): Entry[][] => {
     if (!item) return [];
@@ -54,6 +57,22 @@
           icon: Heart,
           run: () => catalog.toggleFavorite(ids),
         },
+        {
+          label: "Albüme ekle…",
+          icon: BookmarkPlus,
+          run: () => {
+            catalog.overlay = "album";
+          },
+        },
+        ...(album
+          ? [
+              {
+                label: many ? `${count(ids.length)} öğeyi albümden çıkar` : "Albümden çıkar",
+                icon: Minus,
+                run: () => catalog.removeFromAlbum(ids),
+              },
+            ]
+          : []),
       ],
       [
         { label: "Bulunduğu klasörü aç", icon: FolderOpen, run: () => catalog.reveal(it.id) },

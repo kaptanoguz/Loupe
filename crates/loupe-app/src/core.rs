@@ -77,6 +77,7 @@ pub struct SidebarDto {
     pub libraries: Vec<LibraryDto>,
     pub views: Vec<ViewCount>,
     pub smart_albums: Vec<SmartAlbumDto>,
+    pub albums: Vec<crate::albums::AlbumDto>,
 }
 
 pub struct AppCore {
@@ -535,6 +536,28 @@ impl AppCore {
         search::delete_smart_album(&self.pool, id)
     }
 
+    // ───────────────────────────── albümler ─────────────────────────────
+
+    pub fn create_album(&self, name: &str) -> AppResult<crate::albums::AlbumDto> {
+        crate::albums::create(&self.pool, name)
+    }
+
+    pub fn rename_album(&self, id: i64, name: &str) -> AppResult<crate::albums::AlbumDto> {
+        crate::albums::rename(&self.pool, id, name)
+    }
+
+    pub fn delete_album(&self, id: i64) -> AppResult<()> {
+        crate::albums::delete(&self.pool, id)
+    }
+
+    pub fn add_to_album(&self, id: i64, media: &[i64]) -> AppResult<u64> {
+        crate::albums::add(&self.pool, id, media)
+    }
+
+    pub fn remove_from_album(&self, id: i64, media: &[i64]) -> AppResult<u64> {
+        crate::albums::remove(&self.pool, id, media)
+    }
+
     // ───────────────────────────── kişiler ─────────────────────────────
 
     pub fn people(&self) -> AppResult<PeopleDto> {
@@ -830,6 +853,7 @@ impl AppCore {
                 ViewCount { key: "places", count: groups.2 },
             ],
             smart_albums: timeline::smart_albums(&self.pool)?,
+            albums: crate::albums::list(&self.pool)?,
         })
     }
 

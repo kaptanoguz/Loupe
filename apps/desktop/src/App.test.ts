@@ -195,4 +195,42 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByRole("contentinfo", { name: "Durum" }).textContent).toContain(`${videos}`));
     await waitFor(() => expect(container.querySelector(".tile[data-idx='0']")?.textContent).toMatch(/\d+:\d\d/));
   });
+
+  it("albüm: sağ tıkla yeni albüm oluşturur, ekler, albümden çıkarır, siler", async () => {
+    const { backend, container } = setup();
+    await waitFor(() => expect(container.querySelector(".tile[data-idx='3']")).toBeTruthy());
+    const tile = (i: number) => container.querySelector(`.tile[data-idx='${i}']`) as HTMLElement;
+    await fireEvent.click(tile(2));
+    await fireEvent.click(tile(3), { ctrlKey: true });
+    await fireEvent.contextMenu(tile(3), { clientX: 50, clientY: 50 });
+    await fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: /Albüme ekle/ }));
+    const picker = screen.getByRole("dialog", { name: "Albüme ekle" });
+    expect(picker.textContent).toContain("2 öğeyi albüme ekle");
+    await fireEvent.input(within(picker).getByRole("textbox", { name: "Albüm adı" }), { target: { value: "Aile" } });
+    await fireEvent.keyDown(within(picker).getByRole("textbox", { name: "Albüm adı" }), { key: "Enter" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Albüme ekle" })).toBeNull());
+    const side = await backend.sidebar();
+    const aile = side.albums.find((a) => a.name === "Aile");
+    expect(aile?.mediaCount).toBe(2);
+
+    // Kenar çubuğundan albüm açılır; sağ tık "Albümden çıkar" sunar.
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Aile/ })).toBeTruthy());
+    await fireEvent.click(screen.getByRole("button", { name: /^Aile/ }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Aile" })).toBeTruthy());
+    await waitFor(() => expect(container.querySelectorAll(".tile[data-idx]:not([style*='display: none'])").length).toBe(2));
+    await fireEvent.contextMenu(tile(0), { clientX: 50, clientY: 50 });
+    await fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Albümden çıkar" }));
+    await waitFor(async () => expect((await backend.sidebar()).albums[0]?.mediaCount).toBe(1));
+
+    // Yeniden adlandır ve sil (onaylı); fotoğraflar katalogda kalır.
+    await fireEvent.click(screen.getByRole("button", { name: "Yeniden adlandır" }));
+    const field = screen.getByRole("textbox", { name: "Albüm adı" });
+    await fireEvent.input(field, { target: { value: "Ailem" } });
+    await fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Ailem" })).toBeTruthy());
+    await fireEvent.click(screen.getByRole("button", { name: "Albümü sil" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Sil" }));
+    await waitFor(async () => expect((await backend.sidebar()).albums).toEqual([]));
+    expect(backend.items.length).toBe(400);
+  });
 });

@@ -15,6 +15,7 @@
   import TrashDialog from "./lib/components/TrashDialog.svelte";
   import ViewHeader from "./lib/components/ViewHeader.svelte";
   import ImportDialog, { type ImportSource } from "./lib/components/ImportDialog.svelte";
+  import AlbumPicker from "./lib/components/AlbumPicker.svelte";
   import ContextMenu from "./lib/components/ContextMenu.svelte";
   import Slideshow from "./lib/components/Slideshow.svelte";
   import WifiModal from "./lib/components/WifiModal.svelte";
@@ -337,6 +338,8 @@
   <Settings {catalog} />
 {:else if catalog.overlay === "import" && importSource}
   <ImportDialog {catalog} source={importSource} onPickSource={() => backend.pickImportSource()} onStart={runImport} />
+{:else if catalog.overlay === "album"}
+  <AlbumPicker {catalog} ids={catalog.targetIds()} />
 {:else if catalog.overlay === "trash"}
   <TrashDialog {catalog} ids={catalog.targetIds()} onConfirm={trashMedia} />
 {/if}

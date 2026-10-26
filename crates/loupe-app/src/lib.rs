@@ -6,6 +6,7 @@
 //! (WebView olmadan) test edilir.
 
 pub mod ai;
+pub mod albums;
 pub mod cloud;
 pub mod config;
 pub mod core;
@@ -27,6 +28,7 @@ pub mod trash;
 pub mod verify;
 
 pub use ai::{AiMode, AiStatusDto};
+pub use albums::AlbumDto;
 pub use cloud::{CloudSettingsDto, CloudTargetDto, CloudTargetInput, EncryptionDto, RecoveryDraftDto};
 pub use config::AppConfig;
 pub use core::{AppCore, QueueDto, SidebarDto, StatusDto, ViewCount};
