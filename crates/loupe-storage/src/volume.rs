@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Write;
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::{Path, PathBuf};
 
@@ -160,12 +160,13 @@ impl VolumeProbe {
             .filter_map(|e| {
                 let raw = e.file_name().to_str()?.to_owned();
                 let target = fs::canonicalize(e.path()).ok()?;
-                #[cfg(unix)]
+                #[cfg(target_os = "linux")]
                 let rdev = fs::metadata(&target)
                     .ok()
                     .filter(|m| m.file_type().is_block_device())
                     .map(|m| (rustix::fs::major(m.rdev()), rustix::fs::minor(m.rdev())));
-                #[cfg(not(unix))]
+                // Aygıt numarası eşlemesi yalnızca /proc/self/mountinfo'nun Linux'ta var.
+                #[cfg(not(target_os = "linux"))]
                 let rdev = None;
                 let name = if hex_names { unescape_hex(&raw) } else { raw };
                 Some(DiskLink { name, target, rdev })
