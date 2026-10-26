@@ -6,6 +6,7 @@
 
   import type { EventCard } from "../api/types";
   import { count } from "../format";
+  import { coreText, t } from "../i18n";
   import type { Catalog } from "../state/catalog.svelte";
 
   interface Props {
@@ -33,10 +34,13 @@
     events = (events ?? []).map((e) => (e.id === card.id ? card : e));
   }
 
+  /** Otomatik başlık çekirdeğin Türkçe tarihidir; kilitli olan kullanıcının verdiği addır. */
+  const titleOf = (e: EventCard): string => (e.locked ? e.title : coreText(e.title));
+
   function open(e: EventCard): void {
     void catalog.open({ kind: "event", id: e.id }, catalog.grouping, {
-      title: e.title,
-      subtitle: [e.range, e.place].filter(Boolean).join(" · "),
+      title: titleOf(e),
+      subtitle: [coreText(e.range), e.place].filter(Boolean).join(" · "),
     });
   }
 
@@ -55,7 +59,7 @@
     if (id === null || !title || !current || title === current.title) return;
     try {
       replace(await catalog.backend.renameEvent(id, title));
-      catalog.flash("Etkinlik yeniden adlandırıldı ve kilitlendi");
+      catalog.flash(t("events.renamed"));
     } catch (e) {
       catalog.fail(e);
     }
@@ -82,22 +86,22 @@
   const locked = $derived(events?.filter((e) => e.locked).length ?? 0);
 </script>
 
-<section class="flex h-full min-w-0 flex-1 flex-col" aria-label="Etkinlikler">
+<section class="flex h-full min-w-0 flex-1 flex-col" aria-label={t("view.events")}>
   <header class="flex h-toolbar shrink-0 items-center gap-3 border-b border-line px-4">
-    <h1 class="text-sm font-medium text-ink">Etkinlikler</h1>
-    <span class="data text-2xs text-ink-3">{count(events?.length ?? 0)} etkinlik · {count(locked)} kilitli</span>
+    <h1 class="text-sm font-medium text-ink">{t("view.events")}</h1>
+    <span class="data text-2xs text-ink-3">{t("events.summary", { n: count(events?.length ?? 0), locked: count(locked) })}</span>
     <span class="flex-1"></span>
-    <span class="text-xs text-ink-3">Yeniden adlandırma ve fotoğraf çıkarma etkinliği kilitler; otomatik kümeleme dokunmaz.</span>
+    <span class="text-xs text-ink-3">{t("events.hint")}</span>
   </header>
 
   <div class="min-h-0 flex-1 overflow-y-auto px-4 py-3">
     {#if events && events.length === 0}
-      <p class="label pt-6">Henüz etkinlik yok</p>
+      <p class="label pt-6">{t("events.none")}</p>
     {/if}
     <ul class="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
       {#each events ?? [] as e (e.id)}
         <li class="flex flex-col border border-line bg-surface">
-          <button class="block aspect-[3/2] w-full overflow-hidden bg-raised" onclick={() => open(e)} aria-label="{e.title} aç">
+          <button class="block aspect-[3/2] w-full overflow-hidden bg-raised" onclick={() => open(e)} aria-label={t("events.open", { name: titleOf(e) })}>
             {#if e.coverHash}
               <img
                 src={catalog.backend.thumbUrl("md", e.coverHash)}
@@ -117,28 +121,28 @@
                   {onkeydown}
                   onblur={commit}
                   class="input h-6 min-w-0 flex-1"
-                  aria-label="Etkinlik başlığı"
+                  aria-label={t("events.titleLabel")}
                 />
               {:else}
                 <button class="min-w-0 flex-1 truncate text-left text-sm text-ink" ondblclick={() => edit(e)} onclick={() => open(e)}>
-                  {e.title}
+                  {titleOf(e)}
                 </button>
-                <button class="btn btn-ghost h-6 px-1" onclick={() => edit(e)} aria-label="Yeniden adlandır">
+                <button class="btn btn-ghost h-6 px-1" onclick={() => edit(e)} aria-label={t("vh.rename")}>
                   <Pencil size={12} strokeWidth={1.5} />
                 </button>
               {/if}
               <button
                 class="btn btn-ghost h-6 px-1 {e.locked ? 'text-amber' : 'text-ink-3'}"
                 onclick={() => toggleLock(e)}
-                aria-label={e.locked ? "Kilidi aç" : "Kilitle"}
+                aria-label={e.locked ? t("events.unlock") : t("events.lock")}
                 aria-pressed={e.locked}
-                title={e.locked ? "Kilitli: yeniden kümeleme değiştirmez" : "Otomatik: yeniden kümelemede değişebilir"}
+                title={e.locked ? t("events.lockedTitle") : t("events.autoTitle")}
               >
                 {#if e.locked}<Lock size={12} strokeWidth={1.5} />{:else}<LockOpen size={12} strokeWidth={1.5} />{/if}
               </button>
             </div>
             <div class="data flex justify-between gap-2 text-2xs text-ink-3">
-              <span class="truncate">{e.range}</span>
+              <span class="truncate">{coreText(e.range)}</span>
               <span>{count(e.count)}</span>
             </div>
             {#if e.place}<span class="truncate text-xs text-ink-2">{e.place}</span>{/if}

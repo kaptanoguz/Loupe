@@ -7,6 +7,7 @@
 
   import type { View } from "../api/types";
   import { count } from "../format";
+  import { t } from "../i18n";
   import type { Catalog } from "../state/catalog.svelte";
   import ArrangeMenu from "./ArrangeMenu.svelte";
 
@@ -29,17 +30,17 @@
   const rootTitle = $derived.by(() => {
     switch (view.kind) {
       case "all":
-        return "Tüm Fotoğraflar";
+        return t("view.all");
       case "favorites":
-        return "Favoriler";
+        return t("view.favorites");
       case "videos":
-        return "Videolar";
+        return t("view.videos");
       case "places":
-        return "Yerler";
+        return t("view.places");
       case "library":
-        return catalog.sidebar?.libraries.find((l) => l.id === view.id)?.name ?? "Klasör";
+        return catalog.sidebar?.libraries.find((l) => l.id === view.id)?.name ?? t("sidebar.folder");
       case "album":
-        return catalog.sidebar?.albums.find((a) => a.id === view.id)?.name ?? "Albüm";
+        return catalog.sidebar?.albums.find((a) => a.id === view.id)?.name ?? t("vh.album");
       default:
         return "";
     }
@@ -49,11 +50,11 @@
     switch (view.kind) {
       case "person":
       case "cluster":
-        return { view: { kind: "people" }, label: "Kişiler" };
+        return { view: { kind: "people" }, label: t("view.people") };
       case "event":
-        return { view: { kind: "events" }, label: "Etkinlikler" };
+        return { view: { kind: "events" }, label: t("view.events") };
       default:
-        return { view: { kind: "all" }, label: "Tüm Fotoğraflar" };
+        return { view: { kind: "all" }, label: t("view.all") };
     }
   });
 
@@ -71,7 +72,7 @@
       const a = await catalog.backend.saveSmartAlbum(name.trim(), view.query, true);
       naming = false;
       await catalog.refreshSidebar();
-      catalog.flash(`Akıllı albüm kaydedildi: ${a.name}`);
+      catalog.flash(t("vh.smartSaved", { name: a.name }));
       void catalog.open({ kind: "smart_album", id: a.id }, catalog.grouping, { title: a.name });
     } catch (e) {
       catalog.fail(e);
@@ -83,7 +84,7 @@
     try {
       await catalog.backend.deleteSmartAlbum(view.id);
       await catalog.refreshSidebar();
-      catalog.flash("Akıllı albüm silindi (fotoğraflar yerinde)");
+      catalog.flash(t("vh.smartDeleted"));
       void catalog.open({ kind: "all" });
     } catch (e) {
       catalog.fail(e);
@@ -96,7 +97,7 @@
       const a = await catalog.backend.renameAlbum(id, name.trim());
       naming = false;
       await catalog.refreshSidebar();
-      catalog.flash(`Albüm adı: ${a.name}`);
+      catalog.flash(t("vh.renamed", { name: a.name }));
     } catch (e) {
       catalog.fail(e);
     }
@@ -110,7 +111,7 @@
       await catalog.backend.deleteAlbum(id);
       confirmDelete = false;
       await catalog.refreshSidebar();
-      catalog.flash("Albüm silindi (fotoğraflar yerinde)");
+      catalog.flash(t("vh.albumDeleted"));
       void catalog.open({ kind: "all" });
     } catch (e) {
       catalog.fail(e);
@@ -123,7 +124,7 @@
     try {
       const card = await catalog.backend.excludeFromEvent(view.id, [it.id]);
       catalog.heading = { title: card.title, subtitle: [card.range, card.place].filter(Boolean).join(" · ") };
-      catalog.flash("Fotoğraf etkinlikten çıkarıldı; etkinlik kilitlendi");
+      catalog.flash(t("vh.excluded"));
       await catalog.open(view);
     } catch (e) {
       catalog.fail(e);
@@ -141,9 +142,9 @@
   }
 </script>
 
-<header class="flex h-toolbar shrink-0 items-center gap-3 border-b border-line bg-canvas px-3" aria-label="Görünüm başlığı">
+<header class="flex h-toolbar shrink-0 items-center gap-3 border-b border-line bg-canvas px-3" aria-label={t("vh.label")}>
   {#if !root}
-    <button class="btn btn-ghost px-2" onclick={() => catalog.open(parent.view)} title={parent.label} aria-label="Geri: {parent.label}">
+    <button class="btn btn-ghost px-2" onclick={() => catalog.open(parent.view)} title={parent.label} aria-label={t("vh.back", { name: parent.label })}>
       <ArrowLeft size={14} strokeWidth={1.5} />
     </button>
   {/if}
@@ -159,30 +160,30 @@
         bind:value={name}
         {onkeydown}
         class="input w-56"
-        placeholder="Albüm adı"
-        aria-label="Akıllı albüm adı"
+        placeholder={t("sidebar.albumName")}
+        aria-label={t("vh.smartName")}
       />
-      <button class="btn btn-primary" onclick={save} disabled={!name.trim()}>Kaydet</button>
+      <button class="btn btn-primary" onclick={save} disabled={!name.trim()}>{t("common.save")}</button>
     {:else}
-      <button class="btn" onclick={startSave}><Save size={14} strokeWidth={1.5} />Akıllı albüm olarak kaydet</button>
+      <button class="btn" onclick={startSave}><Save size={14} strokeWidth={1.5} />{t("vh.saveSmart")}</button>
     {/if}
   {:else if view.kind === "event"}
-    <button class="btn" onclick={exclude} disabled={!catalog.selectedItem}>Seçili fotoğrafı çıkar</button>
+    <button class="btn" onclick={exclude} disabled={!catalog.selectedItem}>{t("vh.exclude")}</button>
   {:else if view.kind === "album"}
     {@const id = view.id}
     {#if naming}
-      <input bind:this={field} bind:value={name} {onkeydown} class="input w-56" aria-label="Albüm adı" />
-      <button class="btn btn-primary" onclick={save} disabled={!name.trim()}>Kaydet</button>
+      <input bind:this={field} bind:value={name} {onkeydown} class="input w-56" aria-label={t("sidebar.albumName")} />
+      <button class="btn btn-primary" onclick={save} disabled={!name.trim()}>{t("common.save")}</button>
     {:else if confirmDelete}
-      <span class="text-xs text-ink-2">Albüm silinsin mi? Fotoğraflar yerinde kalır.</span>
-      <button class="btn" onclick={() => (confirmDelete = false)}>Vazgeç</button>
-      <button class="btn border-amber text-amber" onclick={() => deleteManual(id)}>Sil</button>
+      <span class="text-xs text-ink-2">{t("vh.confirmDelete")}</span>
+      <button class="btn" onclick={() => (confirmDelete = false)}>{t("common.cancel")}</button>
+      <button class="btn border-amber text-amber" onclick={() => deleteManual(id)}>{t("common.delete")}</button>
     {:else}
-      <button class="btn" onclick={startSave}><Pencil size={14} strokeWidth={1.5} />Yeniden adlandır</button>
-      <button class="btn" onclick={() => (confirmDelete = true)}><Trash size={14} strokeWidth={1.5} />Albümü sil</button>
+      <button class="btn" onclick={startSave}><Pencil size={14} strokeWidth={1.5} />{t("vh.rename")}</button>
+      <button class="btn" onclick={() => (confirmDelete = true)}><Trash size={14} strokeWidth={1.5} />{t("vh.deleteAlbum")}</button>
     {/if}
   {:else if view.kind === "smart_album"}
-    <button class="btn" onclick={removeAlbum}><Trash size={14} strokeWidth={1.5} />Albümü sil</button>
+    <button class="btn" onclick={removeAlbum}><Trash size={14} strokeWidth={1.5} />{t("vh.deleteAlbum")}</button>
   {/if}
   <ArrangeMenu {catalog} />
 </header>

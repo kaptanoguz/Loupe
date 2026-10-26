@@ -1,5 +1,6 @@
 <script lang="ts">
   import { bytes, clock, count, rate } from "../format";
+  import { t } from "../i18n";
   import type { Catalog } from "../state/catalog.svelte";
 
   interface Props {
@@ -11,7 +12,7 @@
   const st = $derived(catalog.status);
   const queue = $derived(st ? st.queue.pending + st.queue.running : 0);
   const selection = $derived.by(() => {
-    if (catalog.selected < 0) return "seçim yok";
+    if (catalog.selected < 0) return t("status.noSelection");
     const d = catalog.detail;
     const pos = `${count(catalog.selected + 1)}/${count(catalog.total)}`;
     if (!d || d.id !== catalog.selectedItem?.id) return pos;
@@ -28,7 +29,7 @@
         }
         return `Wi-Fi :${l.port ?? "?"}${l.verifiedFiles > 0 ? ` · ✓${count(l.verifiedFiles)}` : ""}`;
       case "error":
-        return "Wi-Fi hata";
+        return t("status.wifiError");
       default:
         return null;
     }
@@ -37,33 +38,34 @@
     const a = st?.ai;
     if (!a || a.mode === "off") return null;
     const pending = a.pending.faces + a.pending.clip + a.pending.clustering;
-    if (a.paused) return { text: "AI duraklatıldı", warn: true };
+    if (a.paused) return { text: t("status.aiPaused"), warn: true };
     return pending > 0 ? { text: `AI ${count(pending)}`, warn: false } : null;
   });
   const uploading = $derived(st?.cloud.filter((c) => c.state === "uploading") ?? []);
 </script>
 
-<footer class="statusbar flex shrink-0 items-center gap-4" aria-label="Durum">
-  <span>{count(st?.totalMedia ?? catalog.total)} fotoğraf</span>
+<footer class="statusbar flex shrink-0 items-center gap-4" aria-label={t("status.label")}>
+  <span>{t("status.photos", { n: count(st?.totalMedia ?? catalog.total) })}</span>
   <span class={st && (st.queue.failed > 0 || st.queue.dead > 0) ? "text-amber" : ""}>
-    iş {count(queue)}{st && st.queue.running > 0 ? ` (${st.queue.running} çalışıyor)` : ""}{st && st.queue.dead > 0
-      ? ` · ${st.queue.dead} başarısız`
+    {t("status.jobs", { n: count(queue) })}{st && st.queue.running > 0 ? t("status.running", { n: st.queue.running }) : ""}{st &&
+    st.queue.dead > 0
+      ? t("status.failed", { n: st.queue.dead })
       : ""}
   </span>
   <span class={st && st.librariesOffline > 0 ? "text-ink-3" : ""}>
-    disk {bytes(st?.freeBytes)} boş{st && st.librariesOffline > 0 ? ` · ${st.librariesOffline} çevrimdışı` : ""}
+    {t("status.diskFree", { size: bytes(st?.freeBytes) })}{st && st.librariesOffline > 0 ? t("status.offline", { n: st.librariesOffline }) : ""}
   </span>
-  {#if st && st.importsActive > 0}<span class="text-amber">içe aktarma {st.importsActive}</span>{/if}
+  {#if st && st.importsActive > 0}<span class="text-amber">{t("status.imports", { n: st.importsActive })}</span>{/if}
   {#if lan}<span class={st && st.lan.activeUploads > 0 ? "text-ink" : ""}>{lan}</span>{/if}
   {#if uploading.length > 0}
-    <span>bulut ↑{count(uploading.reduce((n, c) => n + c.pending, 0))}</span>
+    <span>{t("status.cloud")} ↑{count(uploading.reduce((n, c) => n + c.pending, 0))}</span>
   {/if}
-  {#if st && st.verifying > 0}<span class="text-amber">doğrulanıyor</span>{/if}
+  {#if st && st.verifying > 0}<span class="text-amber">{t("status.verifying")}</span>{/if}
   {#if ai}
     <button
       class={ai.warn ? "text-amber" : ""}
       onclick={() => catalog.openSettings("ai")}
-      title="Yapay zekâ analizi">{ai.text}</button
+      title={t("status.aiTitle")}>{ai.text}</button
     >
   {/if}
   <span class="min-w-0 flex-1 truncate text-right text-ink">
@@ -72,5 +74,5 @@
         role="status">{catalog.notice}</span
       >{:else}{selection}{/if}
   </span>
-  <span class="text-ink-3" title="Son düzen hesabı">{catalog.layoutMs.toFixed(1)} ms</span>
+  <span class="text-ink-3" title={t("status.layoutTitle")}>{catalog.layoutMs.toFixed(1)} ms</span>
 </footer>

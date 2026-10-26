@@ -1,5 +1,6 @@
 <script lang="ts" module>
   import type { CloudProvider } from "../../api/types";
+  import { t } from "../../i18n";
 
   export interface ProviderSpec {
     key: CloudProvider;
@@ -12,18 +13,18 @@
   }
 
   const S3_FIELDS = (endpoint: string, region: string) => [
-    { key: "endpoint", label: "Uç nokta", placeholder: endpoint },
-    { key: "bucket", label: "Kova", placeholder: "loupe-yedek" },
-    { key: "region", label: "Bölge", placeholder: region },
+    { key: "endpoint", label: t("cloud.endpoint"), placeholder: endpoint },
+    { key: "bucket", label: t("cloud.bucket"), placeholder: t("cloud.bucketPlaceholder") },
+    { key: "region", label: t("cloud.region"), placeholder: region },
   ];
 
   export const PROVIDERS: ProviderSpec[] = [
-    { key: "s3", name: "Amazon S3", fields: S3_FIELDS("https://s3.eu-central-1.amazonaws.com", "eu-central-1"), user: "Erişim anahtarı", secret: "Gizli anahtar" },
+    { key: "s3", name: "Amazon S3", fields: S3_FIELDS("https://s3.eu-central-1.amazonaws.com", "eu-central-1"), user: t("cloud.accessKey"), secret: t("cloud.secretKey") },
     { key: "b2", name: "Backblaze B2", fields: S3_FIELDS("https://s3.eu-central-003.backblazeb2.com", "eu-central-003"), user: "keyID", secret: "applicationKey" },
-    { key: "r2", name: "Cloudflare R2", fields: S3_FIELDS("https://<hesap>.r2.cloudflarestorage.com", "auto"), user: "Erişim anahtarı", secret: "Gizli anahtar" },
-    { key: "wasabi", name: "Wasabi", fields: S3_FIELDS("https://s3.eu-central-1.wasabisys.com", "eu-central-1"), user: "Erişim anahtarı", secret: "Gizli anahtar" },
-    { key: "webdav", name: "WebDAV", fields: [{ key: "url", label: "Adres", placeholder: "https://bulut.example.org/remote.php/dav/files/oguz/" }], user: "Kullanıcı", secret: "Parola" },
-    { key: "local", name: "Yerel klasör", fields: [{ key: "path", label: "Klasör", placeholder: "/mnt/yedek/loupe" }], user: null, secret: null },
+    { key: "r2", name: "Cloudflare R2", fields: S3_FIELDS(t("cloud.r2Endpoint"), "auto"), user: t("cloud.accessKey"), secret: t("cloud.secretKey") },
+    { key: "wasabi", name: "Wasabi", fields: S3_FIELDS("https://s3.eu-central-1.wasabisys.com", "eu-central-1"), user: t("cloud.accessKey"), secret: t("cloud.secretKey") },
+    { key: "webdav", name: "WebDAV", fields: [{ key: "url", label: t("wifi.address"), placeholder: "https://cloud.example.org/remote.php/dav/files/me/" }], user: t("cloud.user"), secret: t("cloud.password") },
+    { key: "local", name: t("cloud.localFolder"), fields: [{ key: "path", label: t("sidebar.folder"), placeholder: t("cloud.localPlaceholder") }], user: null, secret: null },
   ];
 
   export function providerSpec(key: CloudProvider): ProviderSpec {
@@ -136,7 +137,7 @@
     if (!f || !spec) return;
     const bw = parseMbps(f.bandwidth);
     if (bw === undefined) {
-      catalog.error = "Bant genişliği pozitif bir sayı (MB/s) olmalı";
+      catalog.error = t("cloud.bwInvalid");
       return;
     }
     const config: Record<string, string> = {};
@@ -162,7 +163,7 @@
     try {
       apply(await catalog.backend.saveCloudTarget(f.id, input));
       form = null;
-      catalog.flash(f.id === null ? `Hedef eklendi: ${input.name}` : `Hedef kaydedildi: ${input.name}`);
+      catalog.flash(f.id === null ? t("cloud.added", { name: input.name }) : t("cloud.saved", { name: input.name }));
     } catch (e) {
       catalog.fail(e);
     } finally {
@@ -182,7 +183,7 @@
     confirmDelete = null;
     try {
       apply(await catalog.backend.deleteCloudTarget(id));
-      catalog.flash("Hedef silindi (buluttaki nesnelere dokunulmadı)");
+      catalog.flash(t("cloud.deleted"));
     } catch (e) {
       catalog.fail(e);
     }
@@ -191,12 +192,12 @@
   async function saveGlobal(): Promise<void> {
     const bw = parseMbps(globalBw);
     if (bw === undefined) {
-      catalog.error = "Bant genişliği pozitif bir sayı (MB/s) olmalı";
+      catalog.error = t("cloud.bwInvalid");
       return;
     }
     try {
       apply(await catalog.backend.setGlobalBandwidth(bw));
-      catalog.flash(bw === null ? "Toplam bant genişliği sınırsız" : `Toplam bant genişliği ${bw} MB/s`);
+      catalog.flash(bw === null ? t("cloud.bwUnlimited") : t("cloud.bwSet", { n: bw }));
     } catch (e) {
       catalog.fail(e);
     }
@@ -206,7 +207,7 @@
     try {
       const st = await catalog.backend.startCloudSync();
       const pending = st.reduce((a, t) => a + t.pending, 0);
-      catalog.flash(`Bulut senkronizasyonu başladı · ${count(pending)} dosya sırada`);
+      catalog.flash(t("app.cloudStarted", { n: count(pending) }));
       void catalog.refreshStatus();
     } catch (e) {
       catalog.fail(e);
@@ -223,88 +224,89 @@
 <div class="flex flex-col gap-4 p-4">
   <section class="flex flex-wrap items-end gap-3">
     <div class="flex flex-1 flex-col gap-1">
-      <span class="label">Kimlik bilgileri</span>
+      <span class="label">{t("cloud.credentials")}</span>
       <span class="text-sm text-ink-2">
         {#if settings?.secretBackend === "secret-service"}
-          Sistem anahtarlığında (Secret Service: GNOME Keyring / KWallet)
+          {t("cloud.keyring")}
         {:else if settings}
-          Yalnızca sizin okuyabildiğiniz dosyalarda (0600). Secret Service bulunamadı.
+          {t("cloud.fileSecrets")}
         {/if}
       </span>
     </div>
     <label class="flex flex-col gap-1">
-      <span class="label">Toplam bant genişliği</span>
+      <span class="label">{t("cloud.totalBw")}</span>
       <span class="flex gap-2">
-        <input class="input data w-24" bind:value={globalBw} placeholder="sınırsız" inputmode="decimal" aria-label="Toplam MB/s" />
+        <input class="input data w-24" bind:value={globalBw} placeholder={t("cloud.unlimited")} inputmode="decimal" aria-label={t("cloud.totalMbps")} />
         <span class="data self-center text-xs text-ink-3">MB/s</span>
-        <button class="btn" onclick={saveGlobal}>Uygula</button>
+        <button class="btn" onclick={saveGlobal}>{t("cloud.apply")}</button>
       </span>
     </label>
-    <button class="btn btn-primary" onclick={sync}><CloudUpload size={14} strokeWidth={1.5} />Senkronizasyonu başlat</button>
+    <button class="btn btn-primary" onclick={sync}><CloudUpload size={14} strokeWidth={1.5} />{t("cloud.startSync")}</button>
   </section>
 
   <section>
     <h2 class="label flex justify-between pb-2">
-      <span>Hedefler</span>
-      {#if !form}<button class="text-ink-2 normal-case hover:text-ink" onclick={() => (form = blank())}>+ Hedef ekle</button>{/if}
+      <span>{t("cloud.targets")}</span>
+      {#if !form}<button class="text-ink-2 normal-case hover:text-ink" onclick={() => (form = blank())}>{t("cloud.addTarget")}</button>{/if}
     </h2>
     <ul class="border border-line">
-      {#each settings?.targets ?? [] as t, i (t.id)}
-        {@const st = statusOf.get(t.id)}
+      {#each settings?.targets ?? [] as tg, i (tg.id)}
+        {@const st = statusOf.get(tg.id)}
         <li class="flex items-center gap-3 px-3 py-2 {i > 0 ? 'border-t border-line' : ''}">
           <div class="flex min-w-0 flex-1 flex-col">
             <span class="flex items-baseline gap-2">
-              <span class="truncate text-sm {t.enabled ? 'text-ink' : 'text-ink-3'}">{t.name}</span>
-              <span class="label">{providerSpec(t.provider).name}</span>
-              {#if t.encrypted}<span class="data text-2xs text-ink-2">age</span>{/if}
+              <span class="truncate text-sm {tg.enabled ? 'text-ink' : 'text-ink-3'}">{tg.name}</span>
+              <span class="label">{providerSpec(tg.provider).name}</span>
+              {#if tg.encrypted}<span class="data text-2xs text-ink-2">age</span>{/if}
             </span>
-            <span class="data truncate text-2xs text-ink-3">{where(t)}</span>
+            <span class="data truncate text-2xs text-ink-3">{where(tg)}</span>
             {#if st}
               <span class="data text-2xs {st.state === 'error' || st.state === 'needs_setup' ? 'text-amber' : 'text-ink-3'}">
                 {st.state === "needs_setup"
-                  ? "kurtarma anahtarı gerekli"
-                  : st.state}{st.pending > 0 ? ` · ${count(st.pending)} sırada` : ""} · {count(st.synced)} yedekli{st.lastError
+                  ? t("cloud.needsKey")
+                  : st.state}{st.pending > 0 ? ` · ${t("ai.queued", { n: count(st.pending) })}` : ""} · {t("cloud.synced", { n: count(st.synced) })}{st.lastError
                   ? ` · ${st.lastError}`
                   : ""}
               </span>
             {/if}
           </div>
-          <span class="data text-2xs text-ink-3">{t.bandwidthMbps === null ? "∞" : `${t.bandwidthMbps} MB/s`}</span>
+          <span class="data text-2xs text-ink-3">{tg.bandwidthMbps === null ? "∞" : `${tg.bandwidthMbps} MB/s`}</span>
           <button
-            class="btn h-6 {t.enabled ? '' : 'text-ink-3'}"
-            onclick={() => toggle(t)}
-            aria-pressed={t.enabled}
-            aria-label="{t.name} {t.enabled ? 'kapat' : 'aç'}">{t.enabled ? "Açık" : "Kapalı"}</button
+            class="btn h-6 {tg.enabled ? '' : 'text-ink-3'}"
+            onclick={() => toggle(tg)}
+            aria-pressed={tg.enabled}
+            aria-label={tg.enabled ? t("cloud.disable", { name: tg.name }) : t("cloud.enable", { name: tg.name })}
+            >{tg.enabled ? t("cloud.on") : t("cloud.off")}</button
           >
-          <button class="btn btn-ghost h-6 px-1" onclick={() => edit(t)} aria-label="{t.name} düzenle">
+          <button class="btn btn-ghost h-6 px-1" onclick={() => edit(tg)} aria-label={t("cloud.edit", { name: tg.name })}>
             <Pencil size={12} strokeWidth={1.5} />
           </button>
-          {#if confirmDelete === t.id}
-            <button class="btn h-6 border-amber text-amber" onclick={() => remove(t.id)}>Sil</button>
+          {#if confirmDelete === tg.id}
+            <button class="btn h-6 border-amber text-amber" onclick={() => remove(tg.id)}>{t("common.delete")}</button>
           {:else}
-            <button class="btn btn-ghost h-6 px-1" onclick={() => (confirmDelete = t.id)} aria-label="{t.name} sil">
+            <button class="btn btn-ghost h-6 px-1" onclick={() => (confirmDelete = tg.id)} aria-label={t("cloud.delete", { name: tg.name })}>
               <Trash size={12} strokeWidth={1.5} />
             </button>
           {/if}
         </li>
       {:else}
-        <li class="px-3 py-2 text-xs text-ink-3">Henüz bulut hedefi yok.</li>
+        <li class="px-3 py-2 text-xs text-ink-3">{t("cloud.none")}</li>
       {/each}
     </ul>
   </section>
 
   {#if form && spec}
-    <section class="flex flex-col gap-3 border border-line p-3" aria-label="Hedef ayarı">
+    <section class="flex flex-col gap-3 border border-line p-3" aria-label={t("cloud.targetForm")}>
       <div class="grid grid-cols-2 gap-3">
         <label class="flex flex-col gap-1">
-          <span class="label">Sağlayıcı</span>
-          <select class="input" bind:value={form.provider} disabled={form.id !== null} aria-label="Sağlayıcı">
+          <span class="label">{t("cloud.provider")}</span>
+          <select class="input" bind:value={form.provider} disabled={form.id !== null} aria-label={t("cloud.provider")}>
             {#each PROVIDERS as p (p.key)}<option value={p.key}>{p.name}</option>{/each}
           </select>
         </label>
         <label class="flex flex-col gap-1">
-          <span class="label">Ad</span>
-          <input class="input" bind:value={form.name} placeholder="B2 Yedek" aria-label="Hedef adı" />
+          <span class="label">{t("wifi.name")}</span>
+          <input class="input" bind:value={form.name} placeholder={t("cloud.namePlaceholder")} aria-label={t("cloud.targetName")} />
         </label>
         {#each spec.fields as field (field.key)}
           <label class="flex flex-col gap-1 {field.key === 'endpoint' || field.key === 'url' || field.key === 'path' ? 'col-span-2' : ''}">
@@ -330,31 +332,31 @@
               class="input data"
               type="password"
               bind:value={form.secret}
-              placeholder={form.hasCredentials ? "kayıtlı · değiştirmek için yazın" : ""}
+              placeholder={form.hasCredentials ? t("cloud.storedSecret") : ""}
               aria-label={spec.secret}
               autocomplete="new-password"
             />
           </label>
         {/if}
         <label class="flex flex-col gap-1">
-          <span class="label">Anahtar öneki</span>
-          <input class="input data" bind:value={form.keyPrefix} aria-label="Anahtar öneki" spellcheck="false" />
+          <span class="label">{t("cloud.prefix")}</span>
+          <input class="input data" bind:value={form.keyPrefix} aria-label={t("cloud.prefix")} spellcheck="false" />
         </label>
         <label class="flex flex-col gap-1">
-          <span class="label">Bant genişliği (MB/s)</span>
-          <input class="input data" bind:value={form.bandwidth} placeholder="sınırsız" inputmode="decimal" aria-label="Hedef MB/s" />
+          <span class="label">{t("cloud.bw")}</span>
+          <input class="input data" bind:value={form.bandwidth} placeholder={t("cloud.unlimited")} inputmode="decimal" aria-label={t("cloud.targetMbps")} />
         </label>
       </div>
       <label class="flex items-center gap-2 text-sm text-ink-2">
         <input type="checkbox" bind:checked={form.encrypted} disabled={form.wasEncrypted} />
-        age ile uçtan uca şifrele
+        {t("cloud.encrypt")}
         <span class="text-xs text-ink-3">
-          {form.wasEncrypted ? "şifreli hedefte kapatılamaz" : "kapalıysa dosyalar sağlayıcıda açık durur"}
+          {form.wasEncrypted ? t("cloud.encryptLocked") : t("cloud.encryptHint")}
         </span>
       </label>
       <div class="flex justify-end gap-2">
-        <button class="btn btn-ghost" onclick={() => (form = null)}>Vazgeç</button>
-        <button class="btn btn-primary" onclick={save} disabled={saving || !form.name.trim()}>Kaydet</button>
+        <button class="btn btn-ghost" onclick={() => (form = null)}>{t("common.cancel")}</button>
+        <button class="btn btn-primary" onclick={save} disabled={saving || !form.name.trim()}>{t("common.save")}</button>
       </div>
     </section>
   {/if}

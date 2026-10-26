@@ -3,6 +3,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import App from "./App.svelte";
 import { MockBackend } from "./lib/api/mock";
+import { useLang } from "./lib/i18n";
 import { LayoutEngine } from "./lib/layout/engine";
 
 // jsdom düzen hesaplamaz: ızgara kabına gerçekçi bir boyut verilir.
@@ -41,6 +42,22 @@ function setup(n = 400) {
 }
 
 describe("App", () => {
+  it("İngilizce arayüz: kenar çubuğu, durum çubuğu ve Ayarlar'daki dil seçimi", async () => {
+    useLang("en");
+    try {
+      setup(40);
+      await waitFor(() => expect(screen.getByRole("heading", { name: "All Photos" })).toBeTruthy());
+      expect(screen.getByRole("navigation", { name: "Sidebar" })).toBeTruthy();
+      await waitFor(() => expect(screen.getByRole("contentinfo", { name: "Status" }).textContent).toContain("40 photos"));
+      await fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+      const langs = screen.getByRole("radiogroup", { name: "Language" });
+      expect(within(langs).getByRole("radio", { name: "English" }).getAttribute("aria-checked")).toBe("true");
+      expect(within(langs).getByRole("radio", { name: "Türkçe" }).getAttribute("aria-checked")).toBe("false");
+    } finally {
+      useLang("tr");
+    }
+  });
+
   it("doğrudan zaman çizelgesiyle açılır: kenar çubuğu, ızgara, denetçi, durum çubuğu", async () => {
     const { container } = setup();
     await waitFor(() => expect(container.querySelectorAll(".tile[data-idx]:not([style*='display: none'])").length).toBeGreaterThan(10));

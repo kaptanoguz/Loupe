@@ -12,6 +12,7 @@
   import { onMount } from "svelte";
 
   import type { ImportMode, ImportRequest, LibraryDto } from "../api/types";
+  import { t } from "../i18n";
   import { DATE_PATTERNS, joinLayout, layoutError, previewPath, splitLayout } from "../importLayout";
   import type { Catalog } from "../state/catalog.svelte";
 
@@ -27,9 +28,9 @@
 
   const SUB_KEY = "loupe.import.sub";
   const MODES: { key: ImportMode; name: string; hint: string }[] = [
-    { key: "copy", name: "Kopyala", hint: "Kaynak olduğu gibi kalır." },
-    { key: "move", name: "Taşı", hint: "Her dosya kopyası doğrulandıktan sonra kaynaktan silinir." },
-    { key: "hardlink", name: "Bağla", hint: "Aynı diskte ek yer kaplamaz; kaynak dosyayla aynı veridir." },
+    { key: "copy", name: t("import.copy"), hint: t("import.copyHint") },
+    { key: "move", name: t("import.move"), hint: t("import.moveHint") },
+    { key: "hardlink", name: t("import.link"), hint: t("import.linkHint") },
   ];
 
   const targets = $derived<LibraryDto[]>(
@@ -120,35 +121,34 @@
   <div
     class="flex w-[560px] max-w-[calc(100vw-32px)] flex-col gap-4 rounded-sm border border-line bg-surface p-4"
     role="dialog"
-    aria-label="İçe aktar"
+    aria-label={t("import.label")}
     aria-modal="true"
     tabindex="-1"
     {onkeydown}
   >
     <h1 class="flex items-center gap-2 text-sm font-medium text-ink">
-      <Import size={14} strokeWidth={1.5} />{iphone ? "iPhone'dan içe aktar" : "Klasörden içe aktar"}
+      <Import size={14} strokeWidth={1.5} />{iphone ? t("import.fromIphone") : t("import.fromFolder")}
     </h1>
 
     <section class="flex flex-col gap-1">
-      <span class="label">Kaynak</span>
+      <span class="label">{t("insp.source")}</span>
       <div class="flex items-center gap-2">
-        <span class="data min-w-0 flex-1 truncate text-xs text-ink-2" title={path}>{path || "seçilmedi"}</span>
+        <span class="data min-w-0 flex-1 truncate text-xs text-ink-2" title={path}>{path || t("import.notChosen")}</span>
         {#if !iphone}
-          <button class="btn h-6" onclick={changeSource}><FolderOpen size={12} strokeWidth={1.5} />Değiştir</button>
+          <button class="btn h-6" onclick={changeSource}><FolderOpen size={12} strokeWidth={1.5} />{t("import.change")}</button>
         {/if}
       </div>
       {#if iphone}
         <p class="text-2xs text-ink-3">
-          Kabloyla iPhone yalnızca Kamera klasörünü (DCIM) verir; albümler gelmez. Albüm göndermek için telefondaki
-          Loupe sayfasındaki Kestirme bölümüne bakın.
+          {t("import.iphoneHint")}
         </p>
       {/if}
     </section>
 
     <section class="flex flex-col gap-1">
-      <label class="label" for="import-target">Hedef kütüphane</label>
+      <label class="label" for="import-target">{t("import.target")}</label>
       {#if targets.length === 0}
-        <p class="text-sm text-amber">Bağlı, yönetilen bir kütüphane yok. Önce kenar çubuğundan klasör ekleyin.</p>
+        <p class="text-sm text-amber">{t("import.noTarget")}</p>
       {:else}
         <select
           id="import-target"
@@ -157,24 +157,24 @@
           onchange={(e) => pickLibrary(Number((e.currentTarget as HTMLSelectElement).value))}
         >
           {#each targets as l (l.id)}
-            <option value={l.id}>{l.name} · {l.root}{l.primary ? " (birincil)" : ""}</option>
+            <option value={l.id}>{l.name} · {l.root}{l.primary ? ` (${t("import.primary")})` : ""}</option>
           {/each}
         </select>
       {/if}
     </section>
 
     <section class="flex flex-col gap-1">
-      <label class="label" for="import-sub">Alt klasör (isteğe bağlı)</label>
+      <label class="label" for="import-sub">{t("import.sub")}</label>
       <input
         id="import-sub"
         class="input"
         bind:value={sub}
-        placeholder={iphone ? "iPhone" : "boş bırakılırsa doğrudan kütüphane klasörü"}
+        placeholder={iphone ? "iPhone" : t("import.subPlaceholder")}
       />
     </section>
 
     <section class="flex flex-col gap-1">
-      <span class="label">Klasör düzeni (çekim tarihine göre)</span>
+      <span class="label">{t("import.layout")}</span>
       <div class="flex gap-1">
         {#each DATE_PATTERNS as p (p.value)}
           <button
@@ -187,9 +187,9 @@
     </section>
 
     <section class="flex flex-col gap-1">
-      <span class="label">Mod</span>
+      <span class="label">{t("import.mode")}</span>
       {#if iphone}
-        <p class="text-xs text-ink-2">Kopyala. Telefondan hiçbir şey silinmez.</p>
+        <p class="text-xs text-ink-2">{t("import.iphoneMode")}</p>
       {:else}
         <div class="flex gap-1">
           {#each MODES as m (m.key)}
@@ -206,19 +206,19 @@
     </section>
 
     <section class="flex flex-col gap-1 border-t border-line pt-3">
-      <span class="label">Örnek hedef</span>
+      <span class="label">{t("import.example")}</span>
       {#if problem}
         <p class="text-xs text-amber">{problem}</p>
       {:else if target?.root}
-        <p class="data text-xs break-all text-ink" aria-label="Örnek hedef yol">{previewPath(target.root, layout, sample)}</p>
+        <p class="data text-xs break-all text-ink" aria-label={t("import.examplePath")}>{previewPath(target.root, layout, sample)}</p>
       {/if}
-      <p class="text-2xs text-ink-3">Daha önce aktarılmış fotoğraflar içerikten tanınır ve atlanır.</p>
+      <p class="text-2xs text-ink-3">{t("import.dupHint")}</p>
     </section>
 
     <div class="flex justify-end gap-2">
-      <button class="btn" disabled={busy} onclick={close}>Vazgeç</button>
+      <button class="btn" disabled={busy} onclick={close}>{t("common.cancel")}</button>
       <button class="btn btn-primary" disabled={busy || !target || !!problem || !path} onclick={start}>
-        {busy ? "Başlatılıyor…" : "İçe aktar"}
+        {busy ? t("import.starting") : t("import.label")}
       </button>
     </div>
   </div>

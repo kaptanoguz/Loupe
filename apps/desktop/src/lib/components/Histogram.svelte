@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Histogram } from "../api/types";
+  import { t } from "../i18n";
 
   interface Props {
     histogram: Histogram | null;
@@ -48,16 +49,16 @@
     {#if histogram.shadowsClippedPermille > 0}
       <span
         class="absolute top-1 left-1 size-1.5 bg-amber"
-        title="Gölgelerde kırpılma: ‰{histogram.shadowsClippedPermille}"
+        title={t("hist.shadows", { n: histogram.shadowsClippedPermille })}
       ></span>
     {/if}
     {#if histogram.highlightsClippedPermille > 0}
       <span
         class="absolute top-1 right-1 size-1.5 bg-amber"
-        title="Parlak alanlarda kırpılma: ‰{histogram.highlightsClippedPermille}"
+        title={t("hist.highlights", { n: histogram.highlightsClippedPermille })}
       ></span>
     {/if}
   {:else}
-    <span class="data absolute inset-0 flex items-center justify-center text-2xs text-ink-3">histogram yok</span>
+    <span class="data absolute inset-0 flex items-center justify-center text-2xs text-ink-3">{t("hist.none")}</span>
   {/if}
 </figure>

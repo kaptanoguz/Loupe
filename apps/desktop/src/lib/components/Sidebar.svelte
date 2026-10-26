@@ -18,6 +18,7 @@
 
   import type { ImportSessionDto, LibraryDto, View, ViewKey } from "../api/types";
   import { bytes, count, shortUuid } from "../format";
+  import { t } from "../i18n";
   import { type Catalog, sameView } from "../state/catalog.svelte";
 
   interface Props {
@@ -47,12 +48,12 @@
   }
 
   const VIEWS: { key: ViewKey; name: string; icon: Component }[] = [
-    { key: "all", name: "Tüm Fotoğraflar", icon: GalleryVerticalEnd },
-    { key: "favorites", name: "Favoriler", icon: Heart },
-    { key: "videos", name: "Videolar", icon: Film },
-    { key: "events", name: "Etkinlikler", icon: Calendar },
-    { key: "people", name: "Kişiler", icon: ScanFace },
-    { key: "places", name: "Yerler", icon: MapIcon },
+    { key: "all", name: t("view.all"), icon: GalleryVerticalEnd },
+    { key: "favorites", name: t("view.favorites"), icon: Heart },
+    { key: "videos", name: t("view.videos"), icon: Film },
+    { key: "events", name: t("view.events"), icon: Calendar },
+    { key: "people", name: t("view.people"), icon: ScanFace },
+    { key: "places", name: t("view.places"), icon: MapIcon },
   ];
 
 
@@ -108,7 +109,7 @@
   const mac = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
 
   function libTitle(l: LibraryDto): string {
-    const parts = [l.root ?? "bağlı değil", `disk ${l.volumeUuid ?? "?"}`, `kütüphane ${l.uuid}`];
+    const parts = [l.root ?? t("sidebar.notMounted"), `${t("sidebar.disk")} ${l.volumeUuid ?? "?"}`, `${t("app.library")} ${l.uuid}`];
     if (l.stateReason) parts.push(l.stateReason);
     return parts.join("\n");
   }
@@ -118,9 +119,9 @@
   );
 </script>
 
-<nav class="flex h-full w-sidebar shrink-0 flex-col border-r border-line bg-surface" aria-label="Kenar çubuğu">
+<nav class="flex h-full w-sidebar shrink-0 flex-col border-r border-line bg-surface" aria-label={t("sidebar.label")}>
   <div class="flex-1 overflow-y-auto py-2">
-    <h2 class="label px-3 pt-1 pb-1">Kütüphaneler</h2>
+    <h2 class="label px-3 pt-1 pb-1">{t("settings.libraries")}</h2>
     <ul>
       {#each catalog.sidebar?.libraries ?? [] as lib (lib.id)}
         {@const view = libraryView(lib.id)}
@@ -143,8 +144,8 @@
               <span class="block truncate text-sm {lib.state === 'online' ? 'text-ink' : 'text-ink-3'}">{lib.name}</span>
               <span class="data block truncate text-2xs text-ink-3">
                 {shortUuid(lib.volumeUuid ?? lib.uuid)} · {lib.state === "online"
-                  ? `${bytes(lib.freeBytes)} boş`
-                  : "çevrimdışı"}
+                  ? t("sidebar.free", { size: bytes(lib.freeBytes) })
+                  : t("sidebar.offline")}
               </span>
             </span>
             <span class="data text-2xs text-ink-3 group-hover:invisible">{count(lib.mediaCount)}</span>
@@ -152,31 +153,31 @@
           <button
             class="absolute top-1 right-2 hidden p-1 text-ink-3 group-hover:block hover:text-ink"
             onclick={() => (confirming = lib.id)}
-            title="Loupe'den kaldır (dosyalar diskte kalır)"
-            aria-label="{lib.name} klasörünü kaldır"
+            title={t("sidebar.removeTitle")}
+            aria-label={t("sidebar.removeLabel", { name: lib.name })}
           >
             <FolderMinus size={14} strokeWidth={1.5} />
           </button>
           {#if confirming === lib.id}
-            <div class="border-y border-line bg-raised px-3 py-2 text-xs" role="alertdialog" aria-label="Klasörü kaldır">
+            <div class="border-y border-line bg-raised px-3 py-2 text-xs" role="alertdialog" aria-label={t("sidebar.removeFolder")}>
               <p class="text-ink">
-                {count(lib.mediaCount)} kayıt Loupe'den çıkar. Diskteki dosyalara dokunulmaz.
+                {t("sidebar.removeBody", { n: count(lib.mediaCount) })}
               </p>
               <div class="mt-2 flex gap-2">
                 <button class="btn btn-primary" disabled={removing} onclick={() => remove(lib.id)}>
-                  {removing ? "Kaldırılıyor…" : "Kaldır"}
+                  {removing ? t("sidebar.removing") : t("common.remove")}
                 </button>
-                <button class="btn" disabled={removing} onclick={() => (confirming = null)}>Vazgeç</button>
+                <button class="btn" disabled={removing} onclick={() => (confirming = null)}>{t("common.cancel")}</button>
               </div>
             </div>
           {/if}
         </li>
       {:else}
-        <li class="px-3 py-1 text-xs text-ink-3">Kütüphane yok</li>
+        <li class="px-3 py-1 text-xs text-ink-3">{t("sidebar.noLibrary")}</li>
       {/each}
     </ul>
 
-    <h2 class="label px-3 pt-4 pb-1">Görünümler</h2>
+    <h2 class="label px-3 pt-4 pb-1">{t("sidebar.views")}</h2>
     <ul>
       {#each VIEWS as v (v.key)}
         {@const view = simpleView(v.key)}
@@ -197,12 +198,12 @@
     </ul>
 
     <div class="flex items-center justify-between pt-4 pr-2 pb-1 pl-3">
-      <h2 class="label">Albümler</h2>
+      <h2 class="label">{t("sidebar.albums")}</h2>
       <button
         class="p-1 text-ink-3 hover:text-ink"
         onclick={() => (naming = true)}
-        title="Yeni albüm"
-        aria-label="Yeni albüm"
+        title={t("sidebar.newAlbum")}
+        aria-label={t("sidebar.newAlbum")}
       >
         <Plus size={14} strokeWidth={1.5} />
       </button>
@@ -216,8 +217,8 @@
             bind:value={newName}
             onkeydown={onNameKey}
             onblur={() => void createAlbum()}
-            placeholder="Albüm adı"
-            aria-label="Yeni albüm adı"
+            placeholder={t("sidebar.albumName")}
+            aria-label={t("sidebar.newAlbumName")}
             autofocus
           />
         </li>
@@ -239,12 +240,12 @@
         </li>
       {:else}
         {#if !naming}
-          <li class="px-3 py-1 text-xs text-ink-3">Albüm yok. Fotoğrafa sağ tıklayıp "Albüme ekle" deyin.</li>
+          <li class="px-3 py-1 text-xs text-ink-3">{t("sidebar.noAlbum")}</li>
         {/if}
       {/each}
     </ul>
 
-    <h2 class="label px-3 pt-4 pb-1">Akıllı Albümler</h2>
+    <h2 class="label px-3 pt-4 pb-1">{t("sidebar.smartAlbums")}</h2>
     <ul>
       {#each catalog.sidebar?.smartAlbums ?? [] as a (a.id)}
         {@const view = albumView(a.id)}
@@ -261,7 +262,7 @@
           </button>
         </li>
       {:else}
-        <li class="px-3 py-1 text-xs text-ink-3">Akıllı albüm yok</li>
+        <li class="px-3 py-1 text-xs text-ink-3">{t("sidebar.noSmartAlbum")}</li>
       {/each}
     </ul>
   </div>
@@ -270,7 +271,7 @@
     {#if importing && (importing.state === "running" || importing.state === "scanning")}
       <div class="data text-2xs text-ink-2" aria-live="polite">
         <div class="flex justify-between">
-          <span>içe aktarılıyor</span><span>{progress ?? "taranıyor"}</span>
+          <span>{t("sidebar.importing")}</span><span>{progress ?? t("sidebar.scanning")}</span>
         </div>
         <div class="mt-1 h-px w-full bg-line">
           <div
@@ -279,34 +280,34 @@
           ></div>
         </div>
         <div class="mt-1 flex justify-between text-ink-3">
-          <span>{bytes(importing.doneBytes)}</span><span>{count(importing.skippedDup)} kopya atlandı</span>
+          <span>{bytes(importing.doneBytes)}</span><span>{t("sidebar.dupSkipped", { n: count(importing.skippedDup) })}</span>
         </div>
       </div>
     {/if}
     <div class="flex gap-2">
-      <button class="btn flex-1 justify-center" onclick={onAddFolder} title="Kütüphane kökü ekle">
-        <FolderPlus size={14} strokeWidth={1.5} />Klasör
+      <button class="btn flex-1 justify-center" onclick={onAddFolder} title={t("sidebar.addRoot")}>
+        <FolderPlus size={14} strokeWidth={1.5} />{t("sidebar.folder")}
       </button>
-      <button class="btn btn-primary flex-1 justify-center" onclick={onImport} title="Klasör seç; hedef, klasör düzeni ve mod sorulur">İçe Aktar</button>
+      <button class="btn btn-primary flex-1 justify-center" onclick={onImport} title={t("sidebar.importTitle")}>{t("sidebar.import")}</button>
     </div>
     <button
       class="btn w-full justify-center"
       onclick={onImportIphone}
       disabled={searchingIphone}
-      title="Kabloyla bağlı iPhone'u bulur; hedef ve klasör düzeni sorulur"
+      title={t("sidebar.iphoneTitle")}
     >
-      <Smartphone size={14} strokeWidth={1.5} />{searchingIphone ? "iPhone aranıyor…" : "iPhone'dan İçe Aktar"}
+      <Smartphone size={14} strokeWidth={1.5} />{searchingIphone ? t("sidebar.iphoneSearching") : t("cmd.iphone")}
     </button>
   </div>
 
-  <div class="flex h-8 shrink-0 items-stretch border-t border-line text-xs" aria-label="Hızlı erişim">
+  <div class="flex h-8 shrink-0 items-stretch border-t border-line text-xs" aria-label={t("sidebar.quick")}>
     <button
       class="flex flex-1 items-center gap-2 px-3 text-ink-2 hover:bg-raised hover:text-ink"
       onclick={() => (catalog.overlay = "wifi")}
-      title="Wi-Fi Telefon Eşleştir"
+      title={t("cmd.wifi")}
     >
       <Wifi size={14} strokeWidth={1.5} />
-      <span>Telefon</span>
+      <span>{t("settings.phone")}</span>
       <span class="data text-2xs {lan && lan.activeUploads > 0 ? 'text-amber' : 'text-ink-3'}">
         {lan ? (lan.activeUploads > 0 ? `↓${lan.activeUploads}` : lan.pairedDevices) : ""}
       </span>
@@ -314,16 +315,16 @@
     <button
       class="flex items-center border-l border-line px-3 text-ink-2 hover:bg-raised hover:text-ink"
       onclick={() => catalog.openSettings("libraries")}
-      title="Ayarlar"
-      aria-label="Ayarlar"
+      title={t("settings.title")}
+      aria-label={t("settings.title")}
     >
       <SlidersHorizontal size={14} strokeWidth={1.5} />
     </button>
     <button
       class="data flex items-center gap-1 border-l border-line px-3 text-2xs whitespace-nowrap text-ink-3 hover:bg-raised hover:text-ink"
       onclick={() => (catalog.overlay = "palette")}
-      title="Komut paleti"
-      aria-label="Komut paleti"
+      title={t("sidebar.palette")}
+      aria-label={t("sidebar.palette")}
     >
       <CommandIcon size={12} strokeWidth={1.5} />{mac ? "⌘K" : "Ctrl+K"}
     </button>

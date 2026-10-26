@@ -3,6 +3,7 @@
  * (dinamik `bg-label-${x}` taranamaz).
  */
 import type { ColorLabel } from "../api/types";
+import { t } from "../i18n";
 
 export const LABEL_BG: Record<ColorLabel, string> = {
   red: "bg-label-red",
@@ -13,9 +14,9 @@ export const LABEL_BG: Record<ColorLabel, string> = {
 };
 
 export const LABEL_NAME: Record<ColorLabel, string> = {
-  red: "Kırmızı",
-  yellow: "Sarı",
-  green: "Yeşil",
-  blue: "Mavi",
-  purple: "Mor",
+  red: t("label.red"),
+  yellow: t("label.yellow"),
+  green: t("label.green"),
+  blue: t("label.blue"),
+  purple: t("label.purple"),
 };

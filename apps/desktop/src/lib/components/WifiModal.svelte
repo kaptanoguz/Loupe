@@ -1,11 +1,12 @@
 <script lang="ts" module>
   import type { ConflictPolicy } from "../api/types";
+  import { t } from "../i18n";
 
   export const POLICIES: { key: ConflictPolicy; name: string; hint: string }[] = [
-    { key: "keep_both", name: "İkisini de tut", hint: "Telefondaki düzenleme yeni sürüm olarak eklenir" },
-    { key: "replace_with_newer", name: "Yeniyle değiştir", hint: "Daha yeni olan katalogdaki sürümün yerine geçer" },
-    { key: "skip", name: "Atla", hint: "Önceden aktarılmış dosyanın düzenlemesi alınmaz" },
-    { key: "ask_user", name: "Sor", hint: "Çakışmalar onay için bekletilir" },
+    { key: "keep_both", name: t("policy.keepBoth"), hint: t("policy.keepBothHint") },
+    { key: "replace_with_newer", name: t("policy.replace"), hint: t("policy.replaceHint") },
+    { key: "skip", name: t("policy.skip"), hint: t("policy.skipHint") },
+    { key: "ask_user", name: t("policy.ask"), hint: t("policy.askHint") },
   ];
 
   /** Cihaz listesinin yoklama aralığı (ms): yeni eşleşme ve son görülme. */
@@ -82,7 +83,7 @@
       const fresh = next.filter((d) => !known.has(d.id) && !d.revoked);
       devices = next;
       if (announce && fresh.length > 0) {
-        catalog.flash(`Eşleşti: ${fresh.map((d) => d.name).join(", ")}`);
+        catalog.flash(t("wifi.paired", { names: fresh.map((d) => d.name).join(", ") }));
         // Belirteç tek kullanımlık: yenisi gösterilir.
         void refresh();
       }
@@ -95,7 +96,7 @@
     confirmRevoke = null;
     try {
       devices = await catalog.backend.revokeDevice(id);
-      catalog.flash("Cihazın erişimi kaldırıldı");
+      catalog.flash(t("wifi.revoked"));
     } catch (e) {
       catalog.fail(e);
     }
@@ -122,13 +123,13 @@
   <div
     class="flex max-h-[calc(100vh-64px)] w-[760px] max-w-[calc(100vw-32px)] flex-col rounded-sm border border-line bg-surface"
     role="dialog"
-    aria-label="Wi-Fi telefon eşleştirme"
+    aria-label={t("wifi.label")}
     aria-modal="true"
   >
     <header class="flex h-toolbar shrink-0 items-center gap-3 border-b border-line px-4">
-      <h1 class="text-sm font-medium text-ink">Wi-Fi Telefon Eşleştir</h1>
+      <h1 class="text-sm font-medium text-ink">{t("cmd.wifi")}</h1>
       <span class="flex-1"></span>
-      <button class="btn btn-ghost px-2" onclick={close} aria-label="Kapat"><X size={14} strokeWidth={1.5} /></button>
+      <button class="btn btn-ghost px-2" onclick={close} aria-label={t("common.close")}><X size={14} strokeWidth={1.5} /></button>
     </header>
 
     <div class="grid min-h-0 flex-1 grid-cols-[256px_1fr] overflow-hidden">
@@ -142,63 +143,61 @@
           {/if}
         </div>
         <div class="flex items-center justify-between">
-          <span class="font-mono text-xl text-ink tabular-nums {remaining <= 10 ? 'text-amber' : ''}" aria-label="Kalan süre">
+          <span class="font-mono text-xl text-ink tabular-nums {remaining <= 10 ? 'text-amber' : ''}" aria-label={t("wifi.remaining")}>
             {clock(remaining)}
           </span>
-          <button class="btn" onclick={refresh} aria-label="Yeni kod"><RefreshCw size={14} strokeWidth={1.5} />Yeni kod</button>
+          <button class="btn" onclick={refresh} aria-label={t("wifi.newCode")}><RefreshCw size={14} strokeWidth={1.5} />{t("wifi.newCode")}</button>
         </div>
         <div class="h-px w-full bg-line">
           <div class="h-px bg-amber" style:width="{qr ? (100 * remaining) / Math.max(1, qr.ttlSecs) : 0}%"></div>
         </div>
         <p class="text-xs text-ink-2">
-          Telefon kamerasıyla tarayın; aktarım sayfası tarayıcıda açılır, uygulama kurmak gerekmez. Kod tek
-          kullanımlıktır ve {qr?.ttlSecs ?? 60} saniyede yenilenir.
+          {t("wifi.scanHint", { n: qr?.ttlSecs ?? 60 })}
         </p>
         <p class="text-2xs text-ink-3">
-          Sertifika bu bilgisayarda üretildiği için tarayıcı bir kez uyarı gösterir: Gelişmiş → Devam. Parmak izi
-          aşağıdakiyle aynı olmalı.
+          {t("wifi.certHint")}
         </p>
         {#if qr}
           <dl class="data text-2xs text-ink-3">
-            <dt class="label">Adres</dt>
+            <dt class="label">{t("wifi.address")}</dt>
             {#each qr.addrs as a (a)}<dd>{a}:{qr.port}</dd>{/each}
-            <dt class="label pt-1">Ad</dt>
+            <dt class="label pt-1">{t("wifi.name")}</dt>
             <dd>{qr.name}</dd>
-            <dt class="label pt-1" title="Tarayıcı sertifika uyarısı gösterirse bu değerle karşılaştırın">
-              Sertifika SHA-256
+            <dt class="label pt-1" title={t("wifi.certTitle")}>
+              {t("wifi.cert")}
             </dt>
-            <dd class="break-all" aria-label="Sertifika parmak izi">{qr.fingerprint}</dd>
+            <dd class="break-all" aria-label={t("wifi.fingerprint")}>{qr.fingerprint}</dd>
           </dl>
         {/if}
       </div>
 
       <div class="flex min-h-0 flex-col">
-        <div class="data grid shrink-0 grid-cols-4 border-b border-line text-xs" aria-label="Aktarım">
+        <div class="data grid shrink-0 grid-cols-4 border-b border-line text-xs" aria-label={t("wifi.transfer")}>
           <div class="border-r border-line px-3 py-2">
-            <div class="label">Hız</div>
+            <div class="label">{t("wifi.speed")}</div>
             <div class="text-ink">{rate(lan?.bytesPerSec)}</div>
           </div>
           <div class="border-r border-line px-3 py-2">
-            <div class="label">Kalan</div>
+            <div class="label">{t("wifi.left")}</div>
             <div class="text-ink">{lan?.etaSecs != null ? clock(lan.etaSecs) : "—"}</div>
           </div>
           <div class="border-r border-line px-3 py-2">
-            <div class="label">Doğrulandı</div>
+            <div class="label">{t("wifi.verified")}</div>
             <div class="text-ink">{count(lan?.verifiedFiles ?? 0)}</div>
           </div>
           <div class="px-3 py-2">
-            <div class="label">Çakışma</div>
+            <div class="label">{t("wifi.conflicts")}</div>
             <div class={lan && lan.conflicts > 0 ? "text-amber" : "text-ink"}>{count(lan?.conflicts ?? 0)}</div>
           </div>
         </div>
         {#if lan && lan.bytesExpected > 0}
           <div class="data border-b border-line px-3 py-2 text-2xs text-ink-3">
-            {bytes(lan.bytesReceived)} / {bytes(lan.bytesExpected)} · {count(lan.skipped)} atlandı · {count(lan.failed)} hata
+            {bytes(lan.bytesReceived)} / {bytes(lan.bytesExpected)} · {t("wifi.skippedFailed", { skipped: count(lan.skipped), failed: count(lan.failed) })}
           </div>
         {/if}
 
         <h2 class="label flex shrink-0 justify-between px-3 pt-3 pb-2">
-          <span>Eşleşmiş cihazlar</span><span class="data">{active.length}</span>
+          <span>{t("wifi.devices")}</span><span class="data">{active.length}</span>
         </h2>
         <ul class="min-h-0 flex-1 overflow-y-auto">
           {#each devices as d (d.id)}
@@ -206,34 +205,34 @@
               <div class="flex items-center gap-2">
                 <Smartphone size={14} strokeWidth={1.5} class="shrink-0 text-ink-3" />
                 <span class="min-w-0 flex-1 truncate text-sm {d.revoked ? '' : 'text-ink'}">{d.name}</span>
-                <span class="data text-2xs text-ink-3">{d.kind === "web" ? `${d.platform} · tarayıcı` : d.platform}</span>
+                <span class="data text-2xs text-ink-3">{d.kind === "web" ? `${d.platform} · ${t("wifi.browser")}` : d.platform}</span>
               </div>
               <div class="data flex justify-between text-2xs text-ink-3">
-                <span>{d.revoked ? "erişim kaldırıldı" : `son ${dateTimeMs(d.lastSeenAt)}`}{d.lastAddress ? ` · ${d.lastAddress}` : ""}</span>
-                <span>{count(d.received)} dosya</span>
+                <span>{d.revoked ? t("wifi.accessRemoved") : t("wifi.lastSeen", { when: dateTimeMs(d.lastSeenAt) })}{d.lastAddress ? ` · ${d.lastAddress}` : ""}</span>
+                <span>{t("wifi.files", { n: count(d.received) })}</span>
               </div>
               {#if !d.revoked}
                 <div class="flex items-center gap-2">
                   <select
                     class="input h-6 min-w-0 flex-1 text-xs"
                     value={d.conflictPolicy}
-                    aria-label="{d.name} çakışma politikası"
+                    aria-label={t("wifi.policy", { name: d.name })}
                     title={POLICIES.find((p) => p.key === d.conflictPolicy)?.hint}
                     onchange={(e) => setPolicy(d.id, (e.currentTarget as HTMLSelectElement).value as ConflictPolicy)}
                   >
                     {#each POLICIES as p (p.key)}<option value={p.key}>{p.name}</option>{/each}
                   </select>
                   {#if confirmRevoke === d.id}
-                    <button class="btn h-6 border-amber text-amber" onclick={() => revoke(d.id)}>Kaldır</button>
-                    <button class="btn btn-ghost h-6" onclick={() => (confirmRevoke = null)}>Vazgeç</button>
+                    <button class="btn h-6 border-amber text-amber" onclick={() => revoke(d.id)}>{t("common.remove")}</button>
+                    <button class="btn btn-ghost h-6" onclick={() => (confirmRevoke = null)}>{t("common.cancel")}</button>
                   {:else}
-                    <button class="btn h-6" onclick={() => (confirmRevoke = d.id)}>Erişimi kaldır</button>
+                    <button class="btn h-6" onclick={() => (confirmRevoke = d.id)}>{t("wifi.revoke")}</button>
                   {/if}
                 </div>
               {/if}
             </li>
           {:else}
-            <li class="px-3 py-2 text-xs text-ink-3">Henüz eşleşmiş cihaz yok.</li>
+            <li class="px-3 py-2 text-xs text-ink-3">{t("wifi.noDevices")}</li>
           {/each}
         </ul>
       </div>
