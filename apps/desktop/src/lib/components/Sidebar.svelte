@@ -3,6 +3,7 @@
   import CommandIcon from "@lucide/svelte/icons/command";
   import FolderMinus from "@lucide/svelte/icons/folder-minus";
   import FolderPlus from "@lucide/svelte/icons/folder-plus";
+  import Film from "@lucide/svelte/icons/film";
   import Heart from "@lucide/svelte/icons/heart";
   import GalleryVerticalEnd from "@lucide/svelte/icons/gallery-vertical-end";
   import MapIcon from "@lucide/svelte/icons/map";
@@ -46,6 +47,7 @@
   const VIEWS: { key: ViewKey; name: string; icon: Component }[] = [
     { key: "all", name: "Tüm Fotoğraflar", icon: GalleryVerticalEnd },
     { key: "favorites", name: "Favoriler", icon: Heart },
+    { key: "videos", name: "Videolar", icon: Film },
     { key: "events", name: "Etkinlikler", icon: Calendar },
     { key: "people", name: "Kişiler", icon: ScanFace },
     { key: "places", name: "Yerler", icon: MapIcon },

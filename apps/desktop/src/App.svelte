@@ -15,6 +15,8 @@
   import TrashDialog from "./lib/components/TrashDialog.svelte";
   import ViewHeader from "./lib/components/ViewHeader.svelte";
   import ImportDialog, { type ImportSource } from "./lib/components/ImportDialog.svelte";
+  import ContextMenu from "./lib/components/ContextMenu.svelte";
+  import Slideshow from "./lib/components/Slideshow.svelte";
   import WifiModal from "./lib/components/WifiModal.svelte";
   import { LayoutEngine } from "./lib/layout/engine";
   import { Catalog, isPageView } from "./lib/state/catalog.svelte";
@@ -183,6 +185,7 @@
       label: catalog.status?.ai.paused ? "Yapay Zekâyı Sürdür" : "Yapay Zekâyı Duraklat",
       hint: "yüz ve CLIP analizi",
     },
+    { id: "slideshow", label: "Slayt Gösterisi", hint: "seçili fotoğraftan ya da işaretlilerle, tam ekran (S)" },
     { id: "people", label: "Kişiler", hint: "yüzleri adlandır, birleştir" },
     { id: "events", label: "Etkinlikler", hint: "ad ver, kilitle" },
     { id: "settings", label: "Ayarlar", hint: "kütüphaneler, telefon, bulut, doğrulama, yapay zekâ" },
@@ -224,6 +227,10 @@
           catalog.flash(ai.paused ? "Arka plan analizi duraklatıldı" : "Arka plan analizi sürüyor");
           break;
         }
+        case "slideshow":
+          catalog.overlay = null;
+          catalog.startSlideshow();
+          break;
         case "people":
         case "events":
           void catalog.open({ kind: id });
@@ -240,10 +247,22 @@
 
   function onkeydown(e: KeyboardEvent): void {
     if (e.defaultPrevented) return;
+    if (catalog.slideshow) {
+      if (catalog.slideKey(e.key)) e.preventDefault();
+      return;
+    }
     // Ctrl/⌘+K metin alanındayken de çalışır (palet açıkken onu kapatır).
     if ((e.ctrlKey || e.metaKey) && (e.key === "k" || e.key === "K")) {
       e.preventDefault();
       catalog.dispatch({ type: "palette" });
+      return;
+    }
+    if (catalog.menu) {
+      // Menü kendi okları ve Enter'ı işler; Esc kapatır.
+      if (e.key === "Escape") {
+        e.preventDefault();
+        catalog.menu = null;
+      }
       return;
     }
     if (catalog.overlay) {
@@ -293,11 +312,22 @@
       {/if}
     </div>
     {#if catalog.inspectorOpen && !page}
-      <Inspector detail={catalog.detail} />
+      <Inspector
+        detail={catalog.detail}
+        onFavorite={(id) => catalog.toggleFavorite([id])}
+        onReveal={(id) => void catalog.reveal(id)}
+      />
     {/if}
   </div>
   <StatusBar {catalog} />
 </div>
+
+{#if catalog.slideshow}
+  <Slideshow {catalog} />
+{/if}
+{#if catalog.menu}
+  <ContextMenu {catalog} x={catalog.menu.x} y={catalog.menu.y} />
+{/if}
 
 {#if catalog.overlay === "palette"}
   <Palette {catalog} {commands} onCommand={runCommand} />

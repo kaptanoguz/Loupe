@@ -24,13 +24,15 @@
     view.kind === "smart_album" ? catalog.sidebar?.smartAlbums.find((a) => a.id === view.id) : undefined,
   );
   /** Kenar çubuğundan açılan kök görünümler: geri düğmesi yok. */
-  const root = $derived(["all", "favorites", "places", "library"].includes(view.kind));
+  const root = $derived(["all", "favorites", "videos", "places", "library"].includes(view.kind));
   const rootTitle = $derived.by(() => {
     switch (view.kind) {
       case "all":
         return "Tüm Fotoğraflar";
       case "favorites":
         return "Favoriler";
+      case "videos":
+        return "Videolar";
       case "places":
         return "Yerler";
       case "library":

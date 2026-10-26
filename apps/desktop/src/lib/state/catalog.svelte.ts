@@ -70,6 +70,34 @@ function loadArrange(): Arrange {
   }
 }
 
+/** Slayt gösterisi: gösterilecek öğe sırası (dizin) ve konum. */
+export interface Slideshow {
+  order: number[];
+  pos: number;
+  paused: boolean;
+}
+
+export interface SlideOptions {
+  seconds: number;
+  shuffle: boolean;
+}
+
+export const SLIDE_SECONDS = [3, 5, 10] as const;
+export const DEFAULT_SLIDE: SlideOptions = { seconds: 5, shuffle: false };
+const SLIDE_KEY = "loupe.slideshow";
+
+function loadSlide(): SlideOptions {
+  try {
+    const s = JSON.parse(localStorage.getItem(SLIDE_KEY) ?? "{}") as Partial<SlideOptions>;
+    return {
+      seconds: SLIDE_SECONDS.includes(s.seconds as 3) ? (s.seconds as number) : DEFAULT_SLIDE.seconds,
+      shuffle: s.shuffle === true,
+    };
+  } catch {
+    return DEFAULT_SLIDE;
+  }
+}
+
 /** Bilgi notu durum çubuğunda bu kadar kalır (ms). */
 export const NOTICE_MS = 4000;
 
@@ -106,6 +134,10 @@ export class Catalog {
   overlay = $state<Overlay>(null);
   settingsTab = $state<SettingsTab>("libraries");
   heading = $state.raw<Heading | null>(null);
+  /** Sağ tık menüsünün konumu (ekran koordinatı). */
+  menu = $state.raw<{ x: number; y: number } | null>(null);
+  slideshow = $state.raw<Slideshow | null>(null);
+  slide = $state.raw<SlideOptions>(DEFAULT_SLIDE);
   /** Son düzen hesabının süresi (ms), durum çubuğunda. */
   layoutMs = $state(0);
   /** Grid'in son hesapladığı düzen (↑/↓ komşu araması için). */
@@ -125,6 +157,7 @@ export class Catalog {
     this.sort = a.sort;
     this.dir = a.dir;
     this.grouping = a.grouping;
+    this.slide = loadSlide();
   }
 
   get arrange(): Arrange {
@@ -159,7 +192,11 @@ export class Catalog {
     const same = sameView(view, this.view);
     const keepId = same ? this.selectedItem?.id : undefined;
     if (!same || heading) this.heading = heading;
-    if (!same) this.clearMarks();
+    if (!same) {
+      this.clearMarks();
+      this.stopSlideshow();
+    }
+    this.menu = null;
     this.view = view;
     this.grouping = grouping;
     this.error = null;
@@ -326,9 +363,14 @@ export class Catalog {
         }
         return true;
       }
+      case "favorite":
+        this.toggleFavorite();
+        return true;
+      case "slideshow":
+        this.startSlideshow();
+        return true;
       case "rate":
-      case "label":
-      case "favorite": {
+      case "label": {
         const it = this.selectedItem;
         const req = it && cullRequestFor(action, it);
         if (req) void this.cull(req);
@@ -370,6 +412,134 @@ export class Catalog {
       case "palette":
         this.overlay = this.overlay === "palette" ? null : "palette";
         return true;
+    }
+  }
+
+  /** Hedeflerin (işaretliler ya da seçili) favorisini değiştirir: hepsi favoriyse çıkarır, değilse ekler. */
+  toggleFavorite(ids: number[] = this.targetIds()): void {
+    if (ids.length === 0) return;
+    const want = new Set(ids);
+    const all = this.items.every((it) => !it || !want.has(it.id) || it.favorite);
+    void this.cull({ ids, favorite: !all });
+  }
+
+  /** Dosyanın klasörünü dosya yöneticisinde açar. */
+  async reveal(id: number): Promise<void> {
+    try {
+      const dir = await this.backend.revealMedia(id);
+      this.flash(`Klasör açıldı: ${dir}`);
+    } catch (e) {
+      this.fail(e);
+    }
+  }
+
+  /** Medyayı sistemin varsayılan uygulamasında açar (video oynatıcı). */
+  async openExternal(id: number): Promise<void> {
+    try {
+      await this.backend.openMedia(id);
+    } catch (e) {
+      this.fail(e);
+    }
+  }
+
+  /** Hedeflerin hepsi favori mi (menü ve düğme metni). */
+  allFavorite(ids: number[] = this.targetIds()): boolean {
+    void this.rev;
+    if (ids.length === 0) return false;
+    const want = new Set(ids);
+    return this.items.every((it) => !it || !want.has(it.id) || it.favorite);
+  }
+
+  /** Gösterinin sırası: işaretliler varsa yalnızca onlar, yoksa görünümün tamamı; `start` ilk sırada. */
+  private slideOrder(start: number): number[] {
+    let order: number[] = [];
+    if (this.marked.size > 1) {
+      this.items.forEach((it, k) => {
+        if (it && this.marked.has(it.id)) order.push(k);
+      });
+    } else {
+      order = Array.from({ length: this.total }, (_, k) => k);
+    }
+    const at = Math.max(0, order.indexOf(start));
+    order = [...order.slice(at), ...order.slice(0, at)];
+    if (this.slide.shuffle) {
+      // İlk öğe yerinde kalır, gerisi karıştırılır (Fisher–Yates).
+      for (let i = order.length - 1; i > 1; i--) {
+        const j = 1 + Math.floor(Math.random() * i);
+        [order[i], order[j]] = [order[j] as number, order[i] as number];
+      }
+    }
+    return order;
+  }
+
+  /** Slayt gösterisini seçili öğeden başlatır (tam ekran). */
+  startSlideshow(): void {
+    if (this.total === 0) return;
+    this.menu = null;
+    const order = this.slideOrder(Math.max(0, this.selected));
+    if (order.length === 0) return;
+    this.slideshow = { order, pos: 0, paused: false };
+    this.select(order[0] as number);
+    void this.backend.setFullscreen(true);
+  }
+
+  stopSlideshow(): void {
+    if (!this.slideshow) return;
+    this.slideshow = null;
+    void this.backend.setFullscreen(false);
+  }
+
+  /** Sonraki (1) ya da önceki (-1) slayt; sonda başa döner. */
+  slideStep(delta: 1 | -1): void {
+    const s = this.slideshow;
+    if (!s) return;
+    const pos = (s.pos + delta + s.order.length) % s.order.length;
+    this.slideshow = { ...s, pos };
+    this.select(s.order[pos] as number);
+  }
+
+  slidePause(paused = !this.slideshow?.paused): void {
+    if (this.slideshow) this.slideshow = { ...this.slideshow, paused };
+  }
+
+  /** Süre ve karıştırma; saklanır. Gösteri sürerken karıştırma o andan itibaren uygulanır. */
+  setSlide(patch: Partial<SlideOptions>): void {
+    this.slide = { ...this.slide, ...patch };
+    try {
+      localStorage.setItem(SLIDE_KEY, JSON.stringify(this.slide));
+    } catch {
+      // Bu oturumda geçerli kalır.
+    }
+    const s = this.slideshow;
+    if (s && patch.shuffle !== undefined) {
+      const current = s.order[s.pos] as number;
+      this.slideshow = { ...s, order: this.slideOrder(current), pos: 0 };
+    }
+  }
+
+  /** Gösteri sırasında tuşlar. Döner: tuş işlendi mi. */
+  slideKey(key: string): boolean {
+    switch (key) {
+      case "Escape":
+        this.stopSlideshow();
+        return true;
+      case " ":
+        this.slidePause();
+        return true;
+      case "ArrowRight":
+        this.slideStep(1);
+        return true;
+      case "ArrowLeft":
+        this.slideStep(-1);
+        return true;
+      case "f":
+      case "F": {
+        const it = this.selectedItem;
+        if (it) this.toggleFavorite([it.id]);
+        return true;
+      }
+      default:
+        return false;
     }
   }
 

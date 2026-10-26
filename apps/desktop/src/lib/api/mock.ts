@@ -118,7 +118,7 @@ interface MockCluster {
 const NEWEST = 1_761_307_200;
 
 export class MockBackend implements Backend {
-  private items: TileItem[] = [];
+  readonly items: TileItem[] = [];
   private libraries: LibraryDto[];
   private albums: SmartAlbumDto[] = [
     { id: 1, name: "5 yıldız RAW", pinned: true },
@@ -161,11 +161,13 @@ export class MockBackend implements Backend {
         flag: "none",
         raw: pick(r, RAWS),
         video: r() < 0.02,
+        durationMs: null,
         sync: pick(r, SYNCS),
         takenAtUtc: t,
         tzOffsetMin: 180,
       });
     }
+    for (const it of this.items) if (it.video) it.durationMs = 5000 + (it.id % 60) * 1000;
     this.libraries = [
       {
         id: 1,
@@ -302,6 +304,8 @@ export class MockBackend implements Backend {
     switch (req.view.kind) {
       case "favorites":
         return this.items.filter((i) => i.favorite);
+      case "videos":
+        return this.items.filter((i) => i.video);
       case "library":
         return req.view.id === 1 ? this.items : [];
       case "search":
@@ -477,6 +481,7 @@ export class MockBackend implements Backend {
       views: [
         { key: "all", count: this.items.length },
         { key: "favorites", count: this.items.filter((i) => i.favorite).length },
+        { key: "videos", count: this.items.filter((i) => i.video).length },
         { key: "events", count: this.events.length },
         { key: "people", count: this.persons.size },
         { key: "places", count: 9 },
@@ -539,6 +544,12 @@ export class MockBackend implements Backend {
     return lib?.mediaCount ?? 0;
   }
   async openMedia(): Promise<void> {}
+  revealed: number[] = [];
+  async revealMedia(id: number): Promise<string> {
+    this.revealed.push(id);
+    return "/home/oguz/Resimler/2026/10";
+  }
+  async setFullscreen(): Promise<void> {}
   async updateLibrary(id: number, patch: LibraryPatch): Promise<LibraryDto> {
     const lib = this.libraries.find((l) => l.id === id);
     if (!lib) throw new Error(`kütüphane ${id} yok`);

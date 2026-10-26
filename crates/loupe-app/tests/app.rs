@@ -303,6 +303,18 @@ fn rating_label_favorite_go_to_db_and_sidecars_even_after_offline() {
     let fav = fx.slice(View::Favorites, Grouping::Day, 0, 10);
     assert_eq!(fav.total, 2);
 
+    // Videolar görünümü: yalnızca video türü, süresiyle.
+    fx.core
+        .pool()
+        .write(|c| {
+            Ok(c.execute("UPDATE media_files SET file_type = 'video', duration_ms = 42000 WHERE id = ?1", [ids[1]])?)
+        })
+        .unwrap();
+    let vids = fx.slice(View::Videos, Grouping::Day, 0, 10);
+    assert_eq!(vids.total, 1);
+    assert!(vids.items[0].video && vids.items[0].duration_ms == Some(42_000), "{:?}", vids.items[0]);
+    assert!(fx.core.sidebar().unwrap().views.iter().any(|v| v.key == "videos" && v.count == 1));
+
     // Etiketi kaldır, puanı sıfırla.
     let res = fx
         .core
