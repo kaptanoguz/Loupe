@@ -231,6 +231,34 @@ async fn delete_smart_album(state: State<'_, Desktop>, id: i64) -> Cmd<()> {
     blocking(&state, move |c| c.delete_smart_album(id)).await
 }
 
+// ───────────────────────────── albümler ─────────────────────────────
+
+#[tauri::command]
+async fn create_album(state: State<'_, Desktop>, name: String) -> Cmd<loupe_app::AlbumDto> {
+    blocking(&state, move |c| c.create_album(&name)).await
+}
+
+#[tauri::command]
+async fn rename_album(state: State<'_, Desktop>, id: i64, name: String) -> Cmd<loupe_app::AlbumDto> {
+    blocking(&state, move |c| c.rename_album(id, &name)).await
+}
+
+#[tauri::command]
+async fn delete_album(state: State<'_, Desktop>, id: i64) -> Cmd<()> {
+    blocking(&state, move |c| c.delete_album(id)).await
+}
+
+/// Döner: albüme yeni eklenen fotoğraf sayısı (zaten içindekiler atlanır).
+#[tauri::command]
+async fn add_to_album(state: State<'_, Desktop>, id: i64, ids: Vec<i64>) -> Cmd<u64> {
+    blocking(&state, move |c| c.add_to_album(id, &ids)).await
+}
+
+#[tauri::command]
+async fn remove_from_album(state: State<'_, Desktop>, id: i64, ids: Vec<i64>) -> Cmd<u64> {
+    blocking(&state, move |c| c.remove_from_album(id, &ids)).await
+}
+
 // ───────────────────────────── kişiler ─────────────────────────────
 
 #[tauri::command]
@@ -518,6 +546,11 @@ pub fn wire<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             search_palette,
             save_smart_album,
             delete_smart_album,
+            create_album,
+            rename_album,
+            delete_album,
+            add_to_album,
+            remove_from_album,
             list_people,
             person_faces,
             name_cluster,

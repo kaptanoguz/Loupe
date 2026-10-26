@@ -793,3 +793,40 @@ fn import_layout_and_library_settings() {
     wait_done(&fx.core, s.id);
     assert!(fx.lib_root.join("2025/IMG_0099.JPG").is_file());
 }
+
+#[test]
+fn manual_albums_hold_chosen_photos_without_touching_files() {
+    let fx = Fx::new();
+    fx.shoot_card();
+    let lib = fx.add_library();
+    fx.import(lib);
+    let ids = fx.all_ids();
+    assert!(ids.len() >= 3);
+
+    let aile = fx.core.create_album("  Aile ").unwrap();
+    assert_eq!((aile.name.as_str(), aile.media_count), ("Aile", 0));
+    // Aynı ad (büyük/küçük harf farksız) ve boş ad reddedilir.
+    assert!(fx.core.create_album("aile").is_err());
+    assert!(fx.core.create_album("   ").is_err());
+
+    // Zaten içindekiler ve olmayan kimlikler atlanır.
+    assert_eq!(fx.core.add_to_album(aile.id, &ids[..2]).unwrap(), 2);
+    assert_eq!(fx.core.add_to_album(aile.id, &[ids[1], ids[2], 999_999]).unwrap(), 1);
+    let v = fx.slice(View::Album { id: aile.id }, Grouping::Day, 0, 10);
+    assert_eq!(v.total, 3);
+    let side = fx.core.sidebar().unwrap();
+    assert_eq!(side.albums.iter().find(|a| a.id == aile.id).map(|a| a.media_count), Some(3));
+
+    assert_eq!(fx.core.remove_from_album(aile.id, &[ids[0]]).unwrap(), 1);
+    assert_eq!(fx.slice(View::Album { id: aile.id }, Grouping::Day, 0, 10).total, 2);
+
+    let gezi = fx.core.create_album("Gezi").unwrap();
+    assert!(fx.core.rename_album(gezi.id, "Aile").is_err());
+    assert_eq!(fx.core.rename_album(gezi.id, "Deniz").unwrap().name, "Deniz");
+
+    // Albümü silmek fotoğrafları kataloğdan çıkarmaz.
+    fx.core.delete_album(aile.id).unwrap();
+    assert!(fx.core.delete_album(aile.id).is_err());
+    assert_eq!(fx.all_ids().len(), ids.len());
+    assert!(fx.core.sidebar().unwrap().albums.iter().all(|a| a.id != aile.id));
+}

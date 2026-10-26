@@ -7,9 +7,11 @@
   import Heart from "@lucide/svelte/icons/heart";
   import GalleryVerticalEnd from "@lucide/svelte/icons/gallery-vertical-end";
   import MapIcon from "@lucide/svelte/icons/map";
+  import Plus from "@lucide/svelte/icons/plus";
   import ScanFace from "@lucide/svelte/icons/scan-face";
   import Smartphone from "@lucide/svelte/icons/smartphone";
   import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
+  import SquareLibrary from "@lucide/svelte/icons/square-library";
   import WandSparkles from "@lucide/svelte/icons/wand-sparkles";
   import Wifi from "@lucide/svelte/icons/wifi";
   import type { Component } from "svelte";
@@ -58,6 +60,40 @@
 
   const libraryView = (id: number): View => ({ kind: "library", id });
   const albumView = (id: number): View => ({ kind: "smart_album", id });
+  const manualView = (id: number): View => ({ kind: "album", id });
+
+  /** Yeni albüm adı girilirken açık. */
+  let naming = $state(false);
+  let newName = $state("");
+
+  async function createAlbum(): Promise<void> {
+    const name = newName.trim();
+    if (!name) {
+      naming = false;
+      return;
+    }
+    try {
+      const a = await catalog.backend.createAlbum(name);
+      naming = false;
+      newName = "";
+      await catalog.refreshSidebar();
+      void catalog.open(manualView(a.id));
+    } catch (e) {
+      catalog.fail(e);
+    }
+  }
+
+  function onNameKey(e: KeyboardEvent): void {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void createAlbum();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      naming = false;
+      newName = "";
+    }
+  }
   const simpleView = (kind: ViewKey): View => ({ kind });
 
   function active(v: View): boolean {
@@ -157,6 +193,54 @@
             <span class="data text-2xs text-ink-3">{count(counts.get(v.key) ?? 0)}</span>
           </button>
         </li>
+      {/each}
+    </ul>
+
+    <div class="flex items-center justify-between pt-4 pr-2 pb-1 pl-3">
+      <h2 class="label">Albümler</h2>
+      <button
+        class="p-1 text-ink-3 hover:text-ink"
+        onclick={() => (naming = true)}
+        title="Yeni albüm"
+        aria-label="Yeni albüm"
+      >
+        <Plus size={14} strokeWidth={1.5} />
+      </button>
+    </div>
+    <ul>
+      {#if naming}
+        <li class="px-3 py-1">
+          <!-- svelte-ignore a11y_autofocus -->
+          <input
+            class="input h-6 w-full text-sm"
+            bind:value={newName}
+            onkeydown={onNameKey}
+            onblur={() => void createAlbum()}
+            placeholder="Albüm adı"
+            aria-label="Yeni albüm adı"
+            autofocus
+          />
+        </li>
+      {/if}
+      {#each catalog.sidebar?.albums ?? [] as a (a.id)}
+        {@const view = manualView(a.id)}
+        <li>
+          <button
+            class="flex h-7 w-full items-center gap-2 px-3 text-left text-sm hover:bg-raised"
+            class:bg-raised={active(view)}
+            class:text-ink={active(view)}
+            class:text-ink-2={!active(view)}
+            onclick={() => catalog.open(view)}
+          >
+            <SquareLibrary size={14} strokeWidth={1.5} />
+            <span class="flex-1 truncate">{a.name}</span>
+            <span class="data text-2xs text-ink-3">{count(a.mediaCount)}</span>
+          </button>
+        </li>
+      {:else}
+        {#if !naming}
+          <li class="px-3 py-1 text-xs text-ink-3">Albüm yok. Fotoğrafa sağ tıklayıp "Albüme ekle" deyin.</li>
+        {/if}
       {/each}
     </ul>
 

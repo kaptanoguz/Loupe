@@ -36,6 +36,10 @@ pub enum View {
     SmartAlbum {
         id: i64,
     },
+    /// Elle oluşturulan albüm.
+    Album {
+        id: i64,
+    },
     /// Arama paletinin sorgusu. Metin varsa sıralama alakaya göredir.
     Search {
         query: Box<loupe_search::SearchQuery>,
@@ -262,6 +266,10 @@ fn plan(conn: &Connection, view: &View, arrange: Arrange, ranked: Option<&[i64]>
         View::Favorites => by_date(format!("{base} AND m.is_favorite = 1"), Vec::new()),
         View::Videos => by_date(format!("{base} AND m.file_type = 'video'"), Vec::new()),
         View::Library { id } => by_date(format!("{base} AND m.library_id = ?1"), vec![Value::Integer(*id)]),
+        View::Album { id } => by_date(
+            format!("{base} AND EXISTS (SELECT 1 FROM album_media am WHERE am.album_id = ?1 AND am.media_id = m.id)"),
+            vec![Value::Integer(*id)],
+        ),
         // Metinli sorgular `ranked` ile gelir; burada yalnızca süzgeçler.
         View::SmartAlbum { id } => {
             let album = loupe_search::albums::get(conn, loupe_search::SmartAlbumId(*id))?;

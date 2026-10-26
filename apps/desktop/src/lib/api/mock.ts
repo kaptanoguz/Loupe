@@ -8,6 +8,7 @@ import type { Backend } from "./backend";
 import type {
   AddedLibrary,
   AiStatusDto,
+  AlbumDto,
   ModelsDto,
   Chip,
   ChipKind,
@@ -306,6 +307,10 @@ export class MockBackend implements Backend {
         return this.items.filter((i) => i.favorite);
       case "videos":
         return this.items.filter((i) => i.video);
+      case "album": {
+        const ids = this.albumMedia.get(req.view.id) ?? new Set<number>();
+        return this.items.filter((i) => ids.has(i.id));
+      }
       case "library":
         return req.view.id === 1 ? this.items : [];
       case "search":
@@ -487,6 +492,7 @@ export class MockBackend implements Backend {
         { key: "places", count: 9 },
       ],
       smartAlbums: [...this.albums],
+      albums: this.manual.map((a) => ({ ...a, mediaCount: this.albumMedia.get(a.id)?.size ?? 0 })),
     };
   }
 
@@ -744,6 +750,60 @@ export class MockBackend implements Backend {
 
   async deleteSmartAlbum(id: number): Promise<void> {
     this.albums = this.albums.filter((a) => a.id !== id);
+  }
+
+  private manual: AlbumDto[] = [];
+  private albumMedia = new Map<number, Set<number>>();
+
+  private manualAlbum(id: number): AlbumDto {
+    const a = this.manual.find((x) => x.id === id);
+    if (!a) throw Object.assign(new Error(`albüm ${id} yok`), { code: "NOT_FOUND" });
+    return a;
+  }
+
+  private checkName(name: string, except?: number): string {
+    const n = name.trim();
+    if (!n) throw Object.assign(new Error("albüm adı boş olamaz"), { code: "INVALID" });
+    if (this.manual.some((a) => a.id !== except && a.name.toLocaleLowerCase("tr") === n.toLocaleLowerCase("tr"))) {
+      throw Object.assign(new Error(`"${n}" adlı bir albüm zaten var`), { code: "INVALID" });
+    }
+    return n;
+  }
+
+  async createAlbum(name: string): Promise<AlbumDto> {
+    const a = { id: this.nextId++, name: this.checkName(name), mediaCount: 0 };
+    this.manual.push(a);
+    this.albumMedia.set(a.id, new Set());
+    return { ...a };
+  }
+
+  async renameAlbum(id: number, name: string): Promise<AlbumDto> {
+    const a = this.manualAlbum(id);
+    a.name = this.checkName(name, id);
+    return { ...a, mediaCount: this.albumMedia.get(id)?.size ?? 0 };
+  }
+
+  async deleteAlbum(id: number): Promise<void> {
+    this.manualAlbum(id);
+    this.manual = this.manual.filter((a) => a.id !== id);
+    this.albumMedia.delete(id);
+  }
+
+  async addToAlbum(id: number, ids: number[]): Promise<number> {
+    this.manualAlbum(id);
+    const set = this.albumMedia.get(id) ?? new Set<number>();
+    const before = set.size;
+    for (const m of ids) set.add(m);
+    this.albumMedia.set(id, set);
+    return set.size - before;
+  }
+
+  async removeFromAlbum(id: number, ids: number[]): Promise<number> {
+    const set = this.albumMedia.get(id);
+    if (!set) return 0;
+    let n = 0;
+    for (const m of ids) if (set.delete(m)) n++;
+    return n;
   }
 
   // ───────────────────────────── kişiler ─────────────────────────────

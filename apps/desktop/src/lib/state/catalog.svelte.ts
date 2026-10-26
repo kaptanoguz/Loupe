@@ -44,7 +44,7 @@ export interface Heading {
   input?: string;
 }
 
-export type Overlay = "palette" | "wifi" | "settings" | "trash" | "import" | null;
+export type Overlay = "palette" | "wifi" | "settings" | "trash" | "import" | "album" | null;
 export type SettingsTab = "libraries" | "phone" | "cloud" | "encryption" | "verify" | "ai";
 
 export const DEFAULT_ARRANGE: Arrange = { sort: "taken", dir: "desc", grouping: "day" };
@@ -421,6 +421,35 @@ export class Catalog {
     const want = new Set(ids);
     const all = this.items.every((it) => !it || !want.has(it.id) || it.favorite);
     void this.cull({ ids, favorite: !all });
+  }
+
+  /** Hedefleri elle oluşturulan albüme ekler. */
+  async addToAlbum(id: number, ids: number[] = this.targetIds()): Promise<void> {
+    if (ids.length === 0) return;
+    try {
+      const added = await this.backend.addToAlbum(id, ids);
+      await this.refreshSidebar();
+      const name = this.sidebar?.albums.find((a) => a.id === id)?.name ?? "albüm";
+      const skipped = ids.length - added;
+      this.flash(`${added} öğe "${name}" albümüne eklendi${skipped > 0 ? ` · ${skipped} tanesi zaten içindeydi` : ""}`);
+    } catch (e) {
+      this.fail(e);
+    }
+  }
+
+  /** Açık albümden hedefleri çıkarır (dosyalar yerinde kalır). */
+  async removeFromAlbum(ids: number[] = this.targetIds()): Promise<void> {
+    const v = this.view;
+    if (v.kind !== "album" || ids.length === 0) return;
+    try {
+      const n = await this.backend.removeFromAlbum(v.id, ids);
+      this.clearMarks();
+      await this.open(v);
+      await this.refreshSidebar();
+      this.flash(`${n} öğe albümden çıkarıldı (dosyalar yerinde)`);
+    } catch (e) {
+      this.fail(e);
+    }
   }
 
   /** Dosyanın klasörünü dosya yöneticisinde açar. */

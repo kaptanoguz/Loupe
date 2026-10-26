@@ -1,5 +1,6 @@
 <script lang="ts">
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+  import Pencil from "@lucide/svelte/icons/pencil";
   import Save from "@lucide/svelte/icons/save";
   import Trash from "@lucide/svelte/icons/trash";
   import { tick } from "svelte";
@@ -24,7 +25,7 @@
     view.kind === "smart_album" ? catalog.sidebar?.smartAlbums.find((a) => a.id === view.id) : undefined,
   );
   /** Kenar çubuğundan açılan kök görünümler: geri düğmesi yok. */
-  const root = $derived(["all", "favorites", "videos", "places", "library"].includes(view.kind));
+  const root = $derived(["all", "favorites", "videos", "places", "library", "album"].includes(view.kind));
   const rootTitle = $derived.by(() => {
     switch (view.kind) {
       case "all":
@@ -37,6 +38,8 @@
         return "Yerler";
       case "library":
         return catalog.sidebar?.libraries.find((l) => l.id === view.id)?.name ?? "Klasör";
+      case "album":
+        return catalog.sidebar?.albums.find((a) => a.id === view.id)?.name ?? "Albüm";
       default:
         return "";
     }
@@ -56,12 +59,13 @@
 
   async function startSave(): Promise<void> {
     naming = true;
-    name = catalog.heading?.input ?? "";
+    name = view.kind === "album" ? rootTitle : (catalog.heading?.input ?? "");
     await tick();
     field?.select();
   }
 
   async function save(): Promise<void> {
+    if (view.kind === "album") return renameManual(view.id);
     if (view.kind !== "search" || !name.trim()) return;
     try {
       const a = await catalog.backend.saveSmartAlbum(name.trim(), view.query, true);
@@ -80,6 +84,33 @@
       await catalog.backend.deleteSmartAlbum(view.id);
       await catalog.refreshSidebar();
       catalog.flash("Akıllı albüm silindi (fotoğraflar yerinde)");
+      void catalog.open({ kind: "all" });
+    } catch (e) {
+      catalog.fail(e);
+    }
+  }
+
+  async function renameManual(id: number): Promise<void> {
+    if (!name.trim()) return;
+    try {
+      const a = await catalog.backend.renameAlbum(id, name.trim());
+      naming = false;
+      await catalog.refreshSidebar();
+      catalog.flash(`Albüm adı: ${a.name}`);
+    } catch (e) {
+      catalog.fail(e);
+    }
+  }
+
+  /** Elle oluşturulan albümün silinme onayı bekleniyor. */
+  let confirmDelete = $state(false);
+
+  async function deleteManual(id: number): Promise<void> {
+    try {
+      await catalog.backend.deleteAlbum(id);
+      confirmDelete = false;
+      await catalog.refreshSidebar();
+      catalog.flash("Albüm silindi (fotoğraflar yerinde)");
       void catalog.open({ kind: "all" });
     } catch (e) {
       catalog.fail(e);
@@ -137,6 +168,19 @@
     {/if}
   {:else if view.kind === "event"}
     <button class="btn" onclick={exclude} disabled={!catalog.selectedItem}>Seçili fotoğrafı çıkar</button>
+  {:else if view.kind === "album"}
+    {@const id = view.id}
+    {#if naming}
+      <input bind:this={field} bind:value={name} {onkeydown} class="input w-56" aria-label="Albüm adı" />
+      <button class="btn btn-primary" onclick={save} disabled={!name.trim()}>Kaydet</button>
+    {:else if confirmDelete}
+      <span class="text-xs text-ink-2">Albüm silinsin mi? Fotoğraflar yerinde kalır.</span>
+      <button class="btn" onclick={() => (confirmDelete = false)}>Vazgeç</button>
+      <button class="btn border-amber text-amber" onclick={() => deleteManual(id)}>Sil</button>
+    {:else}
+      <button class="btn" onclick={startSave}><Pencil size={14} strokeWidth={1.5} />Yeniden adlandır</button>
+      <button class="btn" onclick={() => (confirmDelete = true)}><Trash size={14} strokeWidth={1.5} />Albümü sil</button>
+    {/if}
   {:else if view.kind === "smart_album"}
     <button class="btn" onclick={removeAlbum}><Trash size={14} strokeWidth={1.5} />Albümü sil</button>
   {/if}
