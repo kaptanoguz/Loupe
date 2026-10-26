@@ -7,7 +7,6 @@
 
 use std::collections::HashMap;
 use std::fs::Metadata;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -259,7 +258,8 @@ impl Libraries {
     /// (disk başka bilgisayardan geldi, katalog yeniden kuruldu) aynı kimlikle
     /// yeniden bağlanır; yoksa yeni kütüphane oluşturulur.
     pub fn add_root(&self, path: &Path, name: Option<&str>, managed: bool) -> AppResult<LibraryDto> {
-        let path = std::fs::canonicalize(path).map_err(AppError::io(format!("klasör {}", path.display())))?;
+        let path =
+            loupe_storage::fsutil::canonicalize(path).map_err(AppError::io(format!("klasör {}", path.display())))?;
         if !path.is_dir() {
             return Err(AppError::Invalid(format!("{} bir klasör değil", path.display())));
         }
@@ -346,8 +346,8 @@ impl Libraries {
             mime: kind.mime.to_owned(),
             size_bytes: digest.size,
             mtime_ns: digest.mtime_ns,
-            inode: Some(meta.ino()),
-            device_id: Some(meta.dev()),
+            inode: Some(loupe_storage::meta::inode(&meta)),
+            device_id: Some(loupe_storage::meta::device(&meta)),
             blake3: digest.blake3,
             phash: digest.phash,
             width: digest.dimensions.map(|d| d.0),
@@ -390,7 +390,7 @@ impl Libraries {
                     (Some(old), Some(new)) => {
                         if let Some(m) = self.pool.read(|c| media::find_by_rel_path(c, lib, &old))? {
                             let mtime = std::fs::metadata(to)
-                                .map(|md| md.mtime().saturating_mul(1_000_000_000).saturating_add(md.mtime_nsec()))
+                                .map(|md| loupe_storage::meta::mtime_ns(&md))
                                 .unwrap_or(m.mtime_ns);
                             self.pool.write(|c| media::update_location(c, m.id, &new, mtime))?;
                             return Ok(Vec::new());

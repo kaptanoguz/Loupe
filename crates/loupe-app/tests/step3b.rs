@@ -394,8 +394,11 @@ async fn pairing_qr_devices_cloud_settings_and_recovery_key() {
     assert!(draft.recipient.starts_with("age1") && draft.challenge.len() == 3 && !draft.replaces);
     let export = fx.tmp.path().join("kurtarma.txt");
     fx.core.export_recovery_key(&export).unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    assert_eq!(fs::metadata(&export).unwrap().permissions().mode() & 0o777, 0o600);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(fs::metadata(&export).unwrap().permissions().mode() & 0o777, 0o600);
+    }
     assert!(fs::read_to_string(&export).unwrap().contains(&draft.secret));
     let wrong: Vec<(usize, String)> = draft.challenge.iter().map(|&i| (i, "QQQQ".to_owned())).collect();
     assert!(fx.core.confirm_recovery_key(&wrong).is_err());

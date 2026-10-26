@@ -372,35 +372,15 @@ impl AppCore {
     /// Medyayı sistemin varsayılan uygulamasında açar (video oynatıcı vb.).
     pub fn open_media(&self, id: i64) -> AppResult<()> {
         let path = self.media_file(id)?;
-        spawn_detached("xdg-open", &[path.as_os_str()])
+        open_path(&path)
     }
 
-    /// Dosyanın klasörünü dosya yöneticisinde açar ve dosyayı seçili gösterir
-    /// (`org.freedesktop.FileManager1.ShowItems`: Nemo, Nautilus, Dolphin…);
-    /// bu servis yoksa klasörü `xdg-open` ile açar. Döner: klasör yolu.
+    /// Dosyanın klasörünü dosya yöneticisinde açar ve dosyayı seçili gösterir.
+    /// Döner: klasör yolu.
     pub fn reveal_media(&self, id: i64) -> AppResult<String> {
         let path = self.media_file(id)?;
         let dir = path.parent().map(Path::to_path_buf).unwrap_or_else(|| path.clone());
-        let shown = std::process::Command::new("dbus-send")
-            .args([
-                "--session",
-                "--print-reply",
-                "--reply-timeout=3000",
-                "--dest=org.freedesktop.FileManager1",
-                "--type=method_call",
-                "/org/freedesktop/FileManager1",
-                "org.freedesktop.FileManager1.ShowItems",
-            ])
-            .arg(format!("array:string:{}", file_uri(&path)))
-            .arg("string:")
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success());
-        if !shown {
-            spawn_detached("xdg-open", &[dir.as_os_str()])?;
-        }
+        reveal_path(&path, &dir)?;
         Ok(dir.to_string_lossy().into_owned())
     }
 
@@ -415,7 +395,7 @@ impl AppCore {
 
     /// Seçili fotoğrafları diskten siler: Çöp Kutusu'na taşır ve kataloğdan çıkarır.
     pub fn trash_media(&self, ids: &[i64]) -> AppResult<crate::trash::TrashResultDto> {
-        self.trash_media_with(ids, &crate::trash::GioTrash)
+        self.trash_media_with(ids, &crate::trash::SystemTrash)
     }
 
     pub fn trash_media_with(
@@ -888,6 +868,56 @@ fn to_db(e: AppError) -> loupe_db::DbError {
     }
 }
 
+/// Dosyayı sistemin varsayılan uygulamasında açar.
+fn open_path(path: &Path) -> AppResult<()> {
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(windows)]
+    let program = "explorer";
+    #[cfg(not(any(target_os = "macos", windows)))]
+    let program = "xdg-open";
+    spawn_detached(program, &[path.as_os_str()])
+}
+
+/// Linux: `org.freedesktop.FileManager1.ShowItems` (Nemo, Nautilus, Dolphin…) dosyayı
+/// seçili gösterir; servis yoksa klasör `xdg-open` ile açılır. macOS: `open -R`.
+/// Windows: `explorer /select,`.
+fn reveal_path(path: &Path, dir: &Path) -> AppResult<()> {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = dir;
+        spawn_detached("open", &[std::ffi::OsStr::new("-R"), path.as_os_str()])
+    }
+    #[cfg(windows)]
+    {
+        let _ = dir;
+        let mut arg = std::ffi::OsString::from("/select,");
+        arg.push(path.as_os_str());
+        spawn_detached("explorer", &[arg.as_os_str()])
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        let shown = std::process::Command::new("dbus-send")
+            .args([
+                "--session",
+                "--print-reply",
+                "--reply-timeout=3000",
+                "--dest=org.freedesktop.FileManager1",
+                "--type=method_call",
+                "/org/freedesktop/FileManager1",
+                "org.freedesktop.FileManager1.ShowItems",
+            ])
+            .arg(format!("array:string:{}", file_uri(path)))
+            .arg("string:")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        if shown { Ok(()) } else { spawn_detached("xdg-open", &[dir.as_os_str()]) }
+    }
+}
+
 /// Programı arka planda başlatır; çıktısı yok sayılır.
 fn spawn_detached(program: &str, args: &[&std::ffi::OsStr]) -> AppResult<()> {
     std::process::Command::new(program)
@@ -902,6 +932,7 @@ fn spawn_detached(program: &str, args: &[&std::ffi::OsStr]) -> AppResult<()> {
 
 /// `file://` URI'si: yol baytları yüzde kodlanır (`dbus-send` virgülü dizi
 /// ayırıcısı sayar; virgül de kodlanır).
+#[cfg(all(unix, not(target_os = "macos")))]
 fn file_uri(path: &Path) -> String {
     use std::os::unix::ffi::OsStrExt;
     let mut out = String::from("file://");
@@ -915,7 +946,7 @@ fn file_uri(path: &Path) -> String {
     out
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix, not(target_os = "macos")))]
 mod tests {
     use super::*;
 

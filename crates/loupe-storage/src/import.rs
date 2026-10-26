@@ -16,7 +16,6 @@
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -25,12 +24,12 @@ use loupe_core::{
     Blake3Hash, CommitOutcome, ImportCatalog, ImportMode, ImportSessionId, LibraryId, MediaId, NewMediaFile, Placement,
     RelPath, classify, now_ms,
 };
-use rustix::io::Errno;
 use uuid::Uuid;
 
 use crate::fsutil::{LibraryLock, create_dir_all_durable, drop_page_cache, fsync_dir, rename_noreplace, space};
 use crate::hash::{FileDigest, HashOptions, hash_file, hash_reader};
 use crate::layout::{DateResolver, MtimeResolver, candidate_name, render_dir};
+use crate::meta;
 use crate::volume::LibraryMarker;
 use crate::{LAN_STAGING_DIR, LOUPE_DIR, StorageError, TMP_DIR};
 
@@ -137,11 +136,11 @@ impl Importer {
     /// Kütüphane kökünü açar: işaret dosyası olmalı, kilit alınır, önceki
     /// çökmeden kalan `.loupe-tmp/` artıkları temizlenir.
     pub fn open(root: &Path, cfg: ImporterConfig) -> Result<Self, StorageError> {
-        let root = fs::canonicalize(root).map_err(StorageError::io("kütüphane kökü", root))?;
+        let root = crate::fsutil::canonicalize(root).map_err(StorageError::io("kütüphane kökü", root))?;
         LibraryMarker::read(&root)?;
         let lock = LibraryLock::acquire(&root)?;
         create_dir_all_durable(&root.join(TMP_DIR))?;
-        let root_dev = fs::metadata(&root).map_err(StorageError::io("stat", &root))?.dev();
+        let root_dev = fs::metadata(&root).map_err(StorageError::io("stat", &root)).map(|m| meta::device(&m))?;
         let imp = Self { root, root_dev, cfg, dates: Box::new(MtimeResolver), expected: None, _lock: lock };
         imp.clean_staging()?;
         Ok(imp)
@@ -249,7 +248,7 @@ impl Importer {
         if !src_meta.is_file() {
             return Err(StorageError::NotAFile(src.to_path_buf()));
         }
-        let src = fs::canonicalize(src).map_err(StorageError::io("yol çözme", src))?;
+        let src = crate::fsutil::canonicalize(src).map_err(StorageError::io("yol çözme", src))?;
         if src.starts_with(&self.root) && !src.starts_with(self.lan_staging_dir()) {
             return Err(StorageError::SourceInsideLibrary(src));
         }
@@ -304,9 +303,9 @@ impl Importer {
             raw_format: kind.raw_format.map(str::to_owned),
             mime: kind.mime.to_owned(),
             size_bytes: digest.size,
-            mtime_ns: placed.mtime().saturating_mul(1_000_000_000).saturating_add(placed.mtime_nsec()),
-            inode: Some(placed.ino()),
-            device_id: Some(placed.dev()),
+            mtime_ns: meta::mtime_ns(&placed),
+            inode: Some(meta::inode(&placed)),
+            device_id: Some(meta::device(&placed)),
             blake3: digest.blake3,
             phash: digest.phash,
             width: digest.dimensions.map(|d| d.0),
@@ -394,18 +393,18 @@ impl Importer {
     fn stage_link(&self, src: &Path, digest: &FileDigest, guard: &mut TempGuard) -> Result<PathBuf, StorageError> {
         ensure_unchanged(src, digest)?;
         let tmp = self.tmp_path("link");
-        fs::hard_link(src, &tmp).map_err(|e| match e.raw_os_error() {
-            Some(c) if c == Errno::XDEV.raw_os_error() => {
+        fs::hard_link(src, &tmp).map_err(|e| match e.kind() {
+            io::ErrorKind::CrossesDevices => {
                 StorageError::CrossDevice { src: src.to_path_buf(), dst: self.root.clone() }
             }
-            Some(c) if c == Errno::PERM.raw_os_error() || c == Errno::OPNOTSUPP.raw_os_error() => {
+            io::ErrorKind::PermissionDenied | io::ErrorKind::Unsupported => {
                 StorageError::HardlinkUnsupported(self.root.clone())
             }
             _ => StorageError::io("hardlink", &tmp)(e),
         })?;
         guard.0 = Some(tmp.clone());
         let linked = fs::metadata(&tmp).map_err(StorageError::io("stat", &tmp))?;
-        if linked.ino() != digest.inode {
+        if meta::inode(&linked) != digest.inode {
             return Err(StorageError::SourceChanged(src.to_path_buf()));
         }
         Ok(tmp)
@@ -477,8 +476,8 @@ fn copy_hashing<R: Read, W: Write>(r: &mut R, w: &mut W, buffer_size: usize) -> 
 /// Hash'lendikten sonra kaynağa dokunulmadı mı (boyut, mtime, inode)?
 fn ensure_unchanged(src: &Path, d: &FileDigest) -> Result<(), StorageError> {
     let m = fs::metadata(src).map_err(StorageError::io("stat", src))?;
-    let mtime_ns = m.mtime().saturating_mul(1_000_000_000).saturating_add(m.mtime_nsec());
-    if m.len() != d.size || mtime_ns != d.mtime_ns || m.ino() != d.inode {
+    let mtime_ns = meta::mtime_ns(&m);
+    if m.len() != d.size || mtime_ns != d.mtime_ns || meta::inode(&m) != d.inode {
         return Err(StorageError::SourceChanged(src.to_path_buf()));
     }
     Ok(())

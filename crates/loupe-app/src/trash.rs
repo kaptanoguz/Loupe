@@ -1,5 +1,5 @@
-//! Seçili fotoğrafları diskten silme. Dosyalar kalıcı silinmez: freedesktop
-//! Çöp Kutusu'na taşınır (`gio trash`; ev dizinindekiler `~/.local/share/Trash`,
+//! Seçili fotoğrafları diskten silme. Dosyalar kalıcı silinmez: sistemin Çöp
+//! Kutusu'na taşınır (Linux'ta freedesktop, `gio trash`; ev dizinindekiler `~/.local/share/Trash`,
 //! başka disktekiler o diskin `.Trash-<uid>` klasörü). Dosya yöneticisinden
 //! geri alınabilir; geri gelen dosyayı klasör izleyicisi yeniden kataloglar.
 //! Loupe'un sidecar'ları (`.xmp`, `.loupe.json`) dosyayla birlikte taşınır.
@@ -22,8 +22,8 @@ use serde::Serialize;
 use crate::library::Libraries;
 use crate::{AppError, AppResult};
 
-/// Bir `gio trash` çağrısındaki en çok dosya (komut satırı sınırı).
-const CHUNK: usize = 200;
+/// Bir Çöp Kutusu çağrısındaki en çok dosya (komut satırı / ortam değişkeni sınırı).
+const CHUNK: usize = if cfg!(windows) { 100 } else { 200 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -50,24 +50,57 @@ pub trait Trasher: Send + Sync {
     fn trash(&self, paths: &[PathBuf]) -> AppResult<String>;
 }
 
-/// `gio trash` (GLib; GNOME, Cinnamon, MATE, XFCE).
+/// Sistemin Çöp Kutusu.
+///
+/// - Linux: `gio trash` (GLib; GNOME, Cinnamon, MATE, XFCE).
+/// - macOS: Finder (`osascript`), dosyalar Çöp Sepeti'ne gider.
+/// - Windows: PowerShell + `Microsoft.VisualBasic` ile Geri Dönüşüm Kutusu.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct GioTrash;
+pub struct SystemTrash;
 
-impl Trasher for GioTrash {
+impl Trasher for SystemTrash {
     fn trash(&self, paths: &[PathBuf]) -> AppResult<String> {
         // Bir dosya taşınamasa da diğerleri taşınır; sonucu dosya varlığı söyler.
-        let out = Command::new("gio")
-            .arg("trash")
-            .arg("--")
-            .args(paths)
+        let out = trash_command(paths)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .output()
-            .map_err(AppError::io("gio trash (Çöp Kutusu) çalıştırılamadı"))?;
+            .map_err(AppError::io("Çöp Kutusu aracı çalıştırılamadı"))?;
         Ok(String::from_utf8_lossy(&out.stderr).trim().to_owned())
     }
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+fn trash_command(paths: &[PathBuf]) -> Command {
+    let mut c = Command::new("gio");
+    c.arg("trash").arg("--").args(paths);
+    c
+}
+
+#[cfg(target_os = "macos")]
+fn trash_command(paths: &[PathBuf]) -> Command {
+    let quote = |p: &PathBuf| {
+        let s = p.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+        format!("POSIX file \"{s}\"")
+    };
+    let list = paths.iter().map(quote).collect::<Vec<_>>().join(", ");
+    let mut c = Command::new("osascript");
+    c.arg("-e").arg(format!("tell application \"Finder\" to delete {{{list}}}"));
+    c
+}
+
+#[cfg(windows)]
+fn trash_command(paths: &[PathBuf]) -> Command {
+    // Yollar ortam değişkeniyle geçer: tırnak ve boşluk kaçışı gerekmez.
+    let list = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n");
+    let script = "Add-Type -AssemblyName Microsoft.VisualBasic; \
+        foreach ($p in ($env:LOUPE_TRASH -split \"`n\")) { if ($p) { \
+        try { [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p, 'OnlyErrorDialogs', 'SendToRecycleBin') } \
+        catch { [Console]::Error.WriteLine($_.Exception.Message) } } }";
+    let mut c = Command::new("powershell");
+    c.args(["-NoProfile", "-NonInteractive", "-Command", script]).env("LOUPE_TRASH", list);
+    c
 }
 
 /// Seçili medyayı Çöp Kutusu'na taşır ve kataloğdan çıkarır. Diski bağlı

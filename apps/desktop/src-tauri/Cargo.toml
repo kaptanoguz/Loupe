@@ -11,7 +11,7 @@ name = "loupe_desktop"
 path = "src/lib.rs"
 
 [[bin]]
-name = "loupe"
+name = "loupe-photos"
 path = "src/main.rs"
 
 [features]

@@ -2,6 +2,8 @@
 
 // Test yardımcıları #[test] dışında olduğu için clippy.toml muafiyeti onları kapsamaz.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+// Inode, hard link ve Unix izinleri üzerine kurulu; Windows'ta derlenmez.
+#![cfg(unix)]
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
