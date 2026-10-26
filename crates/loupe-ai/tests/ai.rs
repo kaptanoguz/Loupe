@@ -555,3 +555,52 @@ fn md_thumbnail_enqueues_face_clip_and_event_jobs_which_workers_complete() {
     assert_eq!(again.detect_faces(ids[0]).unwrap(), 0);
     assert_eq!(count("SELECT count(*) FROM faces"), 4);
 }
+
+#[test]
+fn ai_jobs_regenerate_a_missing_thumbnail_instead_of_dying() {
+    // Önbellek temizlendi: küçük resim yok, AI işleri tek deneme hakkıyla
+    // kuyrukta. Eksik `md` üretilip beklenir; deneme harcanmaz, iş dead olmaz.
+    let e = env();
+    std::fs::create_dir_all(e.media_dir()).unwrap();
+    let img = scene(1200, 900, [240, 140, 40], &[(AYSE, (300, 250))], 300);
+    img.save(e.media_dir().join("silinen.png")).unwrap();
+    let ids = e.add_media(&[("silinen.png".to_owned(), T0)]);
+
+    let cache = ThumbCache::new(e.dir.path().join("thumbs"));
+    let root = e.media_dir();
+    let pipeline = MediaPipeline::new(
+        Arc::clone(&e.pool),
+        Thumbnailer::new(cache.clone(), Box::new(ImageBackend)),
+        None,
+        move |m: &loupe_db::models::MediaFile| Some(root.join(m.rel_path.as_str())),
+    )
+    .with_event_debounce(Duration::from_millis(100));
+    let ai = AiJobHandler::new(Arc::clone(&e.pool), cache, AiEngine::from(DeterministicMockEngine::default()));
+    let router = JobRouter::new()
+        .route(&[JobKind::Thumb, JobKind::MetadataFull, JobKind::Geocode], Arc::new(pipeline))
+        .route(&AI_JOB_KINDS, Arc::new(ai));
+
+    let retry = loupe_jobs::RetryPolicy { wait: Duration::from_millis(50), ..Default::default() };
+    let q = Arc::new(JobQueue::with_retry(Arc::clone(&e.pool), retry));
+    q.enqueue_batch(&[
+        NewJob::media(JobKind::FaceDetect, ids[0], "", Priority::Background).with_max_attempts(1),
+        NewJob::media(JobKind::ClipEmbed, ids[0], "", Priority::Background).with_max_attempts(1),
+    ])
+    .unwrap();
+    let cfg = WorkerConfig { workers: 2, reserved_immediate: 0, mode: ResourceMode::Full, ..Default::default() };
+    let workers = WorkerPool::start(Arc::clone(&q), Arc::new(router), cfg).unwrap();
+
+    let count = |sql: &str| -> i64 { e.pool.read(|c| Ok(c.query_row(sql, [], |r| r.get(0))?)).unwrap() };
+    assert!(
+        wait_until(Duration::from_secs(30), || {
+            count("SELECT count(*) FROM media_ml_state WHERE faces_at IS NOT NULL AND clip_at IS NOT NULL") == 1
+        }),
+        "{:?} dead={:?}",
+        q.stats().unwrap(),
+        q.dead_letters(10).unwrap()
+    );
+    workers.shutdown();
+    assert_eq!(q.stats().unwrap().dead, 0);
+    assert_eq!(count("SELECT count(*) FROM thumbnails WHERE size_class = 'md'"), 1);
+    assert_eq!(count("SELECT count(*) FROM faces"), 1);
+}
