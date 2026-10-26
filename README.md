@@ -1,69 +1,89 @@
 # Loupe
 
-Linux için yerel öncelikli (local-first) fotoğraf kataloglama, LAN senkronizasyon ve hibrit bulut yedekleme uygulaması.
+A local-first photo catalog with offline face recognition and semantic search, Wi-Fi transfer from your phone, and encrypted cloud backup. Your photos stay on your own disks; Loupe only indexes, organizes and protects them.
 
-Durum: Adım 4 — gerçek kullanıma hazır: telefon kamerasıyla QR'ı tarayıp tarayıcıdan kurulumsuz Wi-Fi aktarımı, SHA-256 doğrulamalı ONNX model yöneticisi (Ayarlar → Yapay zekâ ya da `make models`), `.deb` ve `.AppImage` paketleri.
+The interface is available in English and Turkish (Settings → language switch at the top right).
 
-- [RFC-001A — Veritabanı ve Depolama Mimarisi](docs/rfc/RFC-001A-veritabani-ve-depolama.md)
-- [RFC-001B — İş Kuyruğu ve AI, LAN Sync, Bulut Yedekleme, Tasarım Sistemi](docs/rfc/RFC-001B-kuyruk-lan-bulut-tasarim.md)
-- [RFC-001C — Çevrimdışı AI, Kişi/Etkinlik Kümeleme ve Hibrit Arama](docs/rfc/RFC-001C-ai-ve-arama.md)
-- [RFC-001D — LAN Senkronizasyonu ve Şifreli Bulut Yedekleme](docs/rfc/RFC-001D-lan-ve-bulut.md)
-- [RFC-001E — Uygulama Kabuğu ve Darkroom Katalog Arayüzü](docs/rfc/RFC-001E-uygulama-kabugu-ve-arayuz.md)
-- [RFC-001F — Arayüzü Motorlara Bağlama (Adım 3B)](docs/rfc/RFC-001F-arayuz-motor-baglantisi.md)
-- [RFC-001G — Kurulumsuz Telefon Aktarımı, Model Yöneticisi ve Linux Paketleme (Adım 4)](docs/rfc/RFC-001G-mobil-aktarim-modeller-paketleme.md)
-- Şema: [`crates/loupe-db/migrations/`](crates/loupe-db/migrations/) · test: `python3 tools/schema-check/check_schema.py crates/loupe-db/migrations`
-- Tasarım sistemi: [`apps/desktop/src/app.css`](apps/desktop/src/app.css) · koruma: `tools/slop-guard/slop-guard.sh`
+## Features
 
-## Hızlı başlangıç (Linux)
+- **Catalog in place or import.** Add existing folders as references, or import from a folder, a memory card or an iPhone over USB with copy, move or hard link. Files land in date-based folders you choose (`{yyyy}/{mm}/{dd}`, with an optional subfolder). Duplicates are recognized by content and skipped.
+- **Fast timeline.** Justified grid that stays smooth with 100,000+ photos; sort by date taken, date added, name, size or rating; group by day, month or year. RAW (CR2, NEF, ARW, DNG), HEIC, JPEG, PNG, WebP and video.
+- **People, events, places.** Offline face detection and clustering (SCRFD + ArcFace), automatic events from time and location, reverse geocoding without a network connection.
+- **Search by meaning.** Ctrl+K opens a palette that mixes natural language ("snow in the mountains", "kitchen") with filters such as `person:anna year:2024 rating:4 place:Dubai`. Save any search as a smart album.
+- **Albums, favorites, slideshow.** Manual albums, favorites, ratings and color labels written to XMP sidecars, full-screen slideshow (S).
+- **Phone transfer without an app.** Scan a QR code and send photos from the phone's browser over your local network (TLS, resumable uploads, BLAKE3 verification). An iOS Shortcut can send whole albums.
+- **Encrypted backup.** End-to-end encryption with [age](https://age-encryption.org) to S3, Backblaze B2, Cloudflare R2, Wasabi, WebDAV or a local/NAS folder, with bandwidth limits and a recovery key.
+- **Bit-rot check.** "Verify Library" re-hashes every file and reports missing or corrupted ones.
+
+## Install
+
+Download the installer for your system from [Releases](https://github.com/kaptanoguz/Loupe/releases).
+
+| System | File | Notes |
+|---|---|---|
+| Ubuntu, Debian, Linux Mint | `*.deb` | `sudo apt install ./Loupe*.deb`. The package is called `loupe-photos` so it never collides with GNOME's unrelated "loupe" image viewer. |
+| Other Linux | `*.AppImage` | `chmod +x` and run it. If it fails with "Failed to register AppImage in system via libappimage", an old AppImageLauncher (2.x) is intercepting it: `sudo apt remove appimagelauncher` fixes it. |
+| macOS (Apple Silicon / Intel) | `*_aarch64.dmg` / `*_x64.dmg` | The app is not signed yet: right-click → Open the first time. |
+| Windows | `*-setup.exe` or `*.msi` | Not signed yet: SmartScreen → More info → Run anyway. |
+
+Face recognition and semantic search need the models (about 2.7 GB, verified with SHA-256): Settings → AI → Download models. On macOS and Windows the AI features and iPhone USB import are not available yet; everything else works.
+
+Upgrading from a build installed as `loupe`: install the new `.deb`, then `sudo apt-mark unhold loupe` if you had held it. The new package replaces the old one.
+
+## Build from source (Linux)
 
 ```sh
-make deps      # Debian/Ubuntu: WebKitGTK 4.1, GTK 3, libvips (Rust ve Node 22 ayrıca)
-make models    # SCRFD, ArcFace, M-CLIP ve ONNX Runtime → ~/.local/share/loupe/models (SHA-256 doğrulamalı)
-make bundle    # target/release/bundle/deb/*.deb ve appimage/*.AppImage
-make dev       # geliştirme: sıcak yeniden yükleme
-make test      # CI'daki denetimlerin tamamı
+make deps      # Debian/Ubuntu: WebKitGTK 4.1, GTK 3, libvips (install Rust and Node 22 separately)
+make models    # SCRFD, ArcFace, M-CLIP and ONNX Runtime → ~/.local/share/loupe/models (SHA-256 verified)
+make bundle    # target/release/bundle/deb/*.deb and appimage/*.AppImage
+make dev       # development with hot reload
+make test      # everything CI runs
 ```
 
-Telefondan aktarım: Loupe'ta sol alttaki **Telefon** → QR'ı telefon kamerasıyla
-tarayın → tarayıcıda açılan sayfada **Fotoğraf / Video Seç**. Uygulama
-kurulmaz; sertifika bu bilgisayarda üretildiği için tarayıcı ilk seferde bir
-kez uyarır (parmak izi Wi-Fi penceresinde). Daha önce aktarılanlar atlanır,
-kopan aktarım kaldığı yerden sürer.
+Releases for all platforms are built by [`.github/workflows/release.yml`](.github/workflows/release.yml) when a `v*` tag is pushed; the installers are attached to a draft release.
 
-## Crate'ler
-
-| Crate | İçerik |
-|---|---|
-| `loupe-core` | Kimlikler, `Blake3Hash`, `PHash`, `RelPath` (NFC), şema enum'ları, katalog trait'leri (`ImportCatalog`, `VerifyCatalog`) |
-| `loupe-db` | SQLite havuzu (WAL, NORMAL, mmap, foreign_keys, busy_timeout), gömülü migrasyon motoru + doğrulama, sqlite-vec, CRUD, 500'lük `BEGIN IMMEDIATE` toplu yazma |
-| `loupe-storage` | Disk/UUID çözümleme ve yeniden konumlandırma, tek geçişte BLAKE3 + pHash, atomik importer (Kopyala/Taşı/Hardlink, `.loupe-tmp/`), debounce'lu izleyici, Verify Library |
-| `loupe-media` | EXIF (JPEG, PNG, WebP, HEIC, CR2/NEF/ARW/DNG), saat dilimi ve GPS; DMS biçimleme; çevrimdışı GeoNames R-ağacı; XMP + `.loupe.json` sidecar; RAW gömülü önizleme; `sm`/`md`/`lg` WebP küçük resim (`ThumbnailBackend`, isteğe bağlı `vips`); `thumb://` işleyicisi |
-| `loupe-jobs` | SQLite `jobs` üzerinde kalıcı kuyruk, viewport önceliği (`bump_viewport_priority`), işçi havuzu (ayrılmış acil işçi, panik yalıtımı), duraklat/mod/kullanıcı etkinliği kısması, üstel geri çekilme ve dead-letter; debounce'lu küresel işler; `JobRouter`; medya işleyicileri (`md` küçük resimden sonra AI işleri) |
-| `loupe-ai` | Model yöneticisi (`models.json` manifesti, zip/tar.gz üyesi, `Range` ile devam eden indirme, SHA-256 doğrulama, atomik yerleştirme, `loupe-models` CLI); `FaceDetector`/`FaceEmbedder`/`ClipImageEncoder`/`ClipTextEncoder` trait'leri; `DeterministicMockEngine` (CI); `ort` özelliğiyle SCRFD + ArcFace + M-CLIP; boşta model boşaltma; artımlı yüz kümeleme (birleştir/ayır/taşı/adlandır); `vec_media_clip`; zaman + konum etkinlik algılama (kullanıcı düzenlemesi korunur) |
-| `loupe-search` | Kişi (hepsi/herhangi), yer (ülke/il/ilçe/yerleşim, kutu, yarıçap), zaman (aralık, yerel yıl/ay/gün), etkinlik, puan, favori, renk, kamera/objektif ve doğal dil metnini tek sorguda birleştiren hibrit arama (CLIP + sözcük, RRF); JSON kurallı akıllı albümler |
-| `loupe-lan` | `_loupe._tcp` mDNS (`Discovery` trait'i, testte bellek içi); QR eşleştirme (60 sn tek kullanımlık jeton, `rcgen` CA, istemci sertifikası imzalama, `devices`); mTLS (`rustls`, TLS 1.3, HTTP/2) ya da tarayıcı oturumu; gömülü kurulumsuz telefon sayfası (saf JS BLAKE3, ön kontrol, tus, çakışma sorusu); tus.io v1.0.0 sürdürülebilir yükleme, BLAKE3 doğrulama, atomik içe aktarma; telefonda düzenlenmiş fotoğraf çakışması (KeepBoth / ReplaceWithNewer / Skip / AskUser); hız, kalan süre, doğrulanan dosya telemetrisi |
-| `loupe-app` | Masaüstü çekirdeği (Tauri'siz, test edilebilir): `AppCore` havuzu, işçileri, izleyicileri, LAN/bulut servislerini başlatır; kütüphane kökleri (bağlı/çevrimdışı, UUID), içe aktarma oturumları, zaman çizelgesi dilimleri (gün/ay/etkinlik başlıkları, alaka sıralı arama), denetçi ayrıntısı + histogram, puan/etiket/favori → DB + sidecar, `thumb://` ve `thumb://orig`; palet ayrıştırıcısı, kişiler/etkinlikler komutları, AI modu (`onnx`/`mock`/`off`) ve duraklatma, QR + cihazlar, bulut hedefleri + kurtarma anahtarı, Secret Service (yoksa `0600` dosya), Kütüphaneyi Doğrula |
-| `apps/desktop/src-tauri` | Tauri v2 kabuğu (`loupe-desktop`): komutlar `spawn_blocking` ile çekirdeğe, asenkron `thumb://` şeması, klasör seçici, kurtarma anahtarı kaydetme penceresi |
-| `loupe-cloud` | `age` X25519 akış şifreleme (cihaz + kurtarma alıcısı), okunabilir kurtarma anahtarı; `CloudProvider` trait'i: S3 uyumlu (B2/R2/S3/Wasabi, multipart), WebDAV, yerel/NAS; `sync_queue` + `sync_status` durum makinesi, token bucket MB/sn sınırı, jitter'lı üstel geri çekilme, uzak checksum ya da geri okuma ile BLAKE3 doğrulama, geri yükleme |
+## Development
 
 ```sh
 cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings   # üretim kodunda unwrap/expect/panic derlemeyi kırar
+cargo clippy --workspace --all-targets -- -D warnings   # unwrap/expect/panic in production code fail the build
 cargo fmt --check
-# Gerçek modeller: ONNX Runtime `make models` ile model dizinine iner
-# (ya da ORT_DYLIB_PATH=/usr/lib/libonnxruntime.so)
+# Real models: ONNX Runtime is downloaded into the model directory by `make models`
+# (or point ORT_DYLIB_PATH at a system libonnxruntime.so)
 cargo clippy -p loupe-ai --features ort --all-targets -- -D warnings
 cargo clippy -p loupe-app --features ort --all-targets -- -D warnings
-# Modeller $XDG_DATA_HOME/loupe/models/ altında: scrfd_10g.onnx, arcface_w600k_r50.onnx,
-# mclip_image.onnx, mclip_text/ (model.onnx + harici ağırlıklar), mclip_tokenizer.json, libonnxruntime.so.
-# Yoksa AI kapalı açılır (etkinlikler yine çalışır). LOUPE_AI=mock deterministik
-# deneme modelini açar, LOUPE_SECRETS=file Secret Service'i atlar.
-scripts/fetch-models.sh status     # durum; install | verify | pin
-make mobile                        # telefon sayfası için test sunucusu (QR adresini yazar)
+# Without models, AI starts switched off (events still work). LOUPE_AI=mock enables a
+# deterministic test model; LOUPE_SECRETS=file skips the Secret Service keyring.
+scripts/fetch-models.sh status     # also: install | verify | pin
+make mobile                        # test server for the phone page (prints the QR address)
 
-# Arayüz (apps/desktop): Svelte 5 + Tailwind v4
+# Interface (apps/desktop): Svelte 5 + Tailwind v4
 cd apps/desktop && npm ci
-npm run dev            # tarayıcıda sahte katalogla; büyük kütüphane: http://localhost:5173/?mock=100000
+npm run dev            # in the browser with a fake catalog; large library: http://localhost:5173/?mock=100000
 npm run check && npm test && npm run build
-npx tauri dev          # gerçek uygulama (WebKitGTK 4.1 gerekir)
+npx tauri dev          # the real app (needs WebKitGTK 4.1 on Linux)
 ```
+
+Interface strings live in [`apps/desktop/src/lib/i18n/`](apps/desktop/src/lib/i18n/): `tr.ts` defines the keys and `en.ts` must translate every one of them (the type checker enforces it).
+
+## Architecture
+
+| Crate | Contents |
+|---|---|
+| `loupe-core` | IDs, `Blake3Hash`, `PHash`, `RelPath` (NFC), schema enums, catalog traits |
+| `loupe-db` | SQLite pool (WAL, NORMAL, mmap), embedded migrations, sqlite-vec, batched `BEGIN IMMEDIATE` writes |
+| `loupe-storage` | Volume/UUID resolution and relocation, single-pass BLAKE3 + pHash, atomic importer (copy/move/hard link), debounced watcher, Verify Library; Linux, macOS and Windows |
+| `loupe-media` | EXIF for JPEG, PNG, WebP, HEIC and RAW; time zones and GPS; offline GeoNames R-tree; XMP and `.loupe.json` sidecars; RAW previews; WebP thumbnails (optional libvips); video via ffmpeg |
+| `loupe-jobs` | Persistent SQLite job queue with viewport priority, worker pool, pause and resource modes, exponential backoff and dead letters |
+| `loupe-ai` | Model manager (manifest, resumable downloads, SHA-256), SCRFD + ArcFace + M-CLIP via ONNX Runtime, incremental face clustering, event detection |
+| `loupe-search` | Hybrid search combining people, places, time, events, ratings, labels, camera/lens and natural language (CLIP + keywords, RRF); smart albums |
+| `loupe-lan` | mDNS discovery, QR pairing, mTLS (TLS 1.3, HTTP/2), the app-free phone page, tus.io resumable uploads with BLAKE3 verification, phone-edit conflict policies |
+| `loupe-cloud` | age encryption, recovery key, S3-compatible / WebDAV / local providers, sync state machine, bandwidth limiting, verified restore |
+| `loupe-app` | The desktop core without Tauri (fully testable): libraries, imports, timeline, inspector, albums, people, events, palette, AI, LAN and cloud services |
+| `apps/desktop` | Tauri v2 shell and the Svelte 5 interface |
+
+Design documents (in Turkish) are in [`docs/rfc/`](docs/rfc/). Schema: [`crates/loupe-db/migrations/`](crates/loupe-db/migrations/), checked by `python3 tools/schema-check/check_schema.py crates/loupe-db/migrations`. Design system: [`apps/desktop/src/app.css`](apps/desktop/src/app.css), guarded by `tools/slop-guard/slop-guard.sh`.
+
+## License notes
+
+The face models (InsightFace) are licensed for non-commercial use only.
