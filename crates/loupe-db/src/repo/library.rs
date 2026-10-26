@@ -105,6 +105,41 @@ pub fn rename(conn: &Connection, id: LibraryId, name: &str) -> Result<(), DbErro
     if n == 0 { Err(DbError::NotFound { entity: "kütüphane", id: id.0 }) } else { Ok(()) }
 }
 
+/// İçe aktarmanın varsayılan klasör düzeni (`{yyyy}/{mm}/{dd}` gibi).
+pub fn set_layout(conn: &Connection, id: LibraryId, template: &str) -> Result<(), DbError> {
+    let n = conn.execute(
+        "UPDATE libraries SET layout_template = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id.0, template, now_ms()],
+    )?;
+    if n == 0 { Err(DbError::NotFound { entity: "kütüphane", id: id.0 }) } else { Ok(()) }
+}
+
+/// İçe aktarma penceresinde önce seçili gelen mod.
+pub fn set_import_mode(conn: &Connection, id: LibraryId, mode: loupe_core::ImportMode) -> Result<(), DbError> {
+    let n = conn.execute(
+        "UPDATE libraries SET default_import_mode = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id.0, mode.as_str(), now_ms()],
+    )?;
+    if n == 0 { Err(DbError::NotFound { entity: "kütüphane", id: id.0 }) } else { Ok(()) }
+}
+
+/// Birincil (varsayılan içe aktarma hedefi) kütüphaneyi değiştirir. Tek birincil
+/// kısıtı (`libraries_one_primary`) yüzünden önce eskisi kaldırılır.
+pub fn set_primary(conn: &mut Connection, id: LibraryId) -> Result<(), DbError> {
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let managed: Option<bool> =
+        tx.query_row("SELECT is_managed FROM libraries WHERE id = ?1", [id.0], |r| r.get(0)).optional()?;
+    match managed {
+        None => return Err(DbError::NotFound { entity: "kütüphane", id: id.0 }),
+        Some(false) => return Err(DbError::Validation("yalnızca yönetilen kütüphane birincil olabilir".into())),
+        Some(true) => {}
+    }
+    tx.execute("UPDATE libraries SET is_primary = 0 WHERE is_primary = 1 AND id <> ?1", [id.0])?;
+    tx.execute("UPDATE libraries SET is_primary = 1, updated_at = ?2 WHERE id = ?1", params![id.0, now_ms()])?;
+    tx.commit()?;
+    Ok(())
+}
+
 /// Disk bağlandı / çıkarıldı / salt okunur oldu. Çevrimiçiyse `last_seen_at` güncellenir.
 pub fn update_presence(conn: &Connection, id: LibraryId, p: &LibraryPresence) -> Result<(), DbError> {
     let now = now_ms();

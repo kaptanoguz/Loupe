@@ -181,6 +181,9 @@ export interface LibraryDto {
   fsType: string | null;
   managed: boolean;
   primary: boolean;
+  /** İçe aktarmanın varsayılan klasör düzeni, ör. `{yyyy}/{mm}/{dd}`. */
+  layoutTemplate: string;
+  defaultImportMode: ImportMode;
   mediaCount: number;
   totalBytes: number | null;
   freeBytes: number | null;
@@ -192,6 +195,16 @@ export interface ImportRequest {
   libraryId: number;
   source: string;
   mode: ImportMode;
+  /** Bu aktarıma özel klasör düzeni (ör. `iPhone/{yyyy}/{mm}`); yoksa kütüphanenin varsayılanı. */
+  layout?: string | null;
+}
+
+/** Ayarlar → Kütüphaneler; verilmeyen alan değişmez. */
+export interface LibraryPatch {
+  name?: string;
+  layoutTemplate?: string;
+  defaultImportMode?: ImportMode;
+  primary?: boolean;
 }
 
 /** Çöp Kutusu'na taşıma sonucu; taşınamayanlar katalogda kalır. */

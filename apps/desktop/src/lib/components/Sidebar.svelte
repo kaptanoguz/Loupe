@@ -13,14 +13,14 @@
   import Wifi from "@lucide/svelte/icons/wifi";
   import type { Component } from "svelte";
 
-  import type { ImportMode, ImportSessionDto, LibraryDto, View, ViewKey } from "../api/types";
+  import type { ImportSessionDto, LibraryDto, View, ViewKey } from "../api/types";
   import { bytes, count, shortUuid } from "../format";
   import { type Catalog, sameView } from "../state/catalog.svelte";
 
   interface Props {
     catalog: Catalog;
     onAddFolder: () => void;
-    onImport: (mode: ImportMode) => void;
+    onImport: () => void;
     onImportIphone: () => void;
     onRemoveLibrary: (id: number) => Promise<void>;
     searchingIphone: boolean;
@@ -42,7 +42,6 @@
       confirming = null;
     }
   }
-  let mode = $state<ImportMode>("copy");
 
   const VIEWS: { key: ViewKey; name: string; icon: Component }[] = [
     { key: "all", name: "Tüm Fotoğraflar", icon: GalleryVerticalEnd },
@@ -52,11 +51,6 @@
     { key: "places", name: "Yerler", icon: MapIcon },
   ];
 
-  const MODES: { key: ImportMode; name: string; hint: string }[] = [
-    { key: "copy", name: "Kopyala", hint: "Kaynak dokunulmadan kalır" },
-    { key: "move", name: "Taşı", hint: "Doğrulandıktan sonra kaynaktan silinir" },
-    { key: "hardlink", name: "Bağla", hint: "Aynı diskte hardlink, ek yer kaplamaz" },
-  ];
 
   const counts = $derived(new Map(catalog.sidebar?.views.map((v) => [v.key, v.count]) ?? []));
 
@@ -203,30 +197,17 @@
         </div>
       </div>
     {/if}
-    <div class="grid grid-cols-3 border border-line" role="radiogroup" aria-label="İçe aktarma modu">
-      {#each MODES as m, i (m.key)}
-        <button
-          class="h-6 text-xs {i > 0 ? 'border-l border-line' : ''} {mode === m.key
-            ? 'bg-raised text-ink'
-            : 'text-ink-3 hover:text-ink-2'}"
-          role="radio"
-          aria-checked={mode === m.key}
-          title={m.hint}
-          onclick={() => (mode = m.key)}>{m.name}</button
-        >
-      {/each}
-    </div>
     <div class="flex gap-2">
       <button class="btn flex-1 justify-center" onclick={onAddFolder} title="Kütüphane kökü ekle">
         <FolderPlus size={14} strokeWidth={1.5} />Klasör
       </button>
-      <button class="btn btn-primary flex-1 justify-center" onclick={() => onImport(mode)}>İçe Aktar</button>
+      <button class="btn btn-primary flex-1 justify-center" onclick={onImport} title="Klasör seç; hedef, klasör düzeni ve mod sorulur">İçe Aktar</button>
     </div>
     <button
       class="btn w-full justify-center"
       onclick={onImportIphone}
       disabled={searchingIphone}
-      title="Kabloyla bağlı iPhone'un fotoğraflarını kopyala"
+      title="Kabloyla bağlı iPhone'u bulur; hedef ve klasör düzeni sorulur"
     >
       <Smartphone size={14} strokeWidth={1.5} />{searchingIphone ? "iPhone aranıyor…" : "iPhone'dan İçe Aktar"}
     </button>
@@ -246,7 +227,7 @@
     </button>
     <button
       class="flex items-center border-l border-line px-3 text-ink-2 hover:bg-raised hover:text-ink"
-      onclick={() => catalog.openSettings("cloud")}
+      onclick={() => catalog.openSettings("libraries")}
       title="Ayarlar"
       aria-label="Ayarlar"
     >

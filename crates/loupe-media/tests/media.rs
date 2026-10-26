@@ -368,3 +368,48 @@ fn vips_backend_matches_contract() {
     std::fs::write(&garbage, b"not an image").unwrap();
     assert!(vips.render(&garbage, &[ThumbSize::Sm], None, ThumbFormat::Webp).unwrap_err().is_permanent());
 }
+
+/// ffmpeg kurulu değilse (ör. ffmpeg'siz CI işi) atlanır.
+fn ffmpeg() -> bool {
+    std::process::Command::new("ffmpeg").arg("-version").output().is_ok_and(|o| o.status.success())
+}
+
+#[test]
+fn video_gets_frame_thumbnail_and_probe_metadata() {
+    if !ffmpeg() {
+        eprintln!("ffmpeg yok: video testi atlandı");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("VID_0001.MP4");
+    // 2 sn, 320x240, dikey kayıt (90° döndürme) ve iPhone etiketleri.
+    let ok = std::process::Command::new("ffmpeg")
+        .args(["-nostdin", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=10:duration=2"])
+        .args(["-metadata", "creation_time=2025-08-14T10:23:45.000000Z"])
+        .args(["-metadata", "location=+41.0082+028.9784/"])
+        .args(["-metadata:s:v", "rotate=90", "-pix_fmt", "yuv420p"])
+        .arg(&src)
+        .status()
+        .unwrap()
+        .success();
+    assert!(ok);
+
+    let meta = read_metadata(&src).unwrap();
+    assert_eq!(meta.duration_ms, Some(2000));
+    assert_eq!(meta.taken_at.unwrap().source, TakenAtSource::Exif);
+    assert!((meta.gps.unwrap().lat - 41.0082).abs() < 1e-6);
+    // Ekranda görünen boyut (döndürme varsa yer değiştirir).
+    assert!(matches!((meta.width, meta.height), (Some(320), Some(240)) | (Some(240), Some(320))));
+
+    let t = Thumbnailer::new(
+        ThumbCache::new(dir.path().join("thumbs")),
+        Box::new(loupe_media::thumb::VideoBackend { inner: Box::new(ImageBackend) }),
+    );
+    let out = t.generate(&src, &hash_file(&src), None, &[ThumbSize::Sm]).unwrap();
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].source_kind, SourceKind::VideoFrame);
+    assert_eq!(out[0].width.max(out[0].height), 256);
+    // Video olmayan dosya iç arka uca gider.
+    let still = t.generate(&fixture("exif/orientation_6.jpg"), &Blake3Hash([7; 32]), None, &[ThumbSize::Sm]).unwrap();
+    assert_eq!(still[0].source_kind, SourceKind::Decode);
+}

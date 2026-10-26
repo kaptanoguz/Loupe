@@ -4,6 +4,8 @@
   import type { Catalog, SettingsTab } from "../state/catalog.svelte";
   import AiSettings from "./settings/AiSettings.svelte";
   import CloudSettings from "./settings/CloudSettings.svelte";
+  import LibrarySettings from "./settings/LibrarySettings.svelte";
+  import PhoneSettings from "./settings/PhoneSettings.svelte";
   import RecoveryKey from "./settings/RecoveryKey.svelte";
   import VerifySettings from "./settings/VerifySettings.svelte";
 
@@ -14,6 +16,8 @@
   let { catalog }: Props = $props();
 
   const TABS: { key: SettingsTab; name: string }[] = [
+    { key: "libraries", name: "Kütüphaneler" },
+    { key: "phone", name: "Telefon" },
     { key: "cloud", name: "Bulut" },
     { key: "encryption", name: "Şifreleme" },
     { key: "verify", name: "Doğrulama" },
@@ -54,7 +58,11 @@
       <button class="btn btn-ghost px-2" onclick={close} aria-label="Kapat"><X size={14} strokeWidth={1.5} /></button>
     </header>
     <div class="min-h-0 flex-1 overflow-y-auto" role="tabpanel">
-      {#if catalog.settingsTab === "cloud"}
+      {#if catalog.settingsTab === "libraries"}
+        <LibrarySettings {catalog} />
+      {:else if catalog.settingsTab === "phone"}
+        <PhoneSettings {catalog} />
+      {:else if catalog.settingsTab === "cloud"}
         <CloudSettings {catalog} />
       {:else if catalog.settingsTab === "encryption"}
         <RecoveryKey {catalog} />

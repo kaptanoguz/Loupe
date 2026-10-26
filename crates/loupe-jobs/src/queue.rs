@@ -336,6 +336,27 @@ impl JobQueue {
         Ok(n == 1)
     }
 
+    /// Belirli dosya türündeki medyanın dead-letter işlerini yeniden kuyruğa
+    /// koyar (ör. ffmpeg kurulunca daha önce başarısız olan video işleri).
+    pub fn retry_dead_for_file_type(&self, kinds: &[JobKind], file_type: &str) -> Result<usize, JobsError> {
+        if kinds.is_empty() {
+            return Ok(0);
+        }
+        let marks = (3..3 + kinds.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+        let sql = format!(
+            "UPDATE jobs SET state = 'pending', attempts = 0, run_after = ?2, updated_at = ?2
+              WHERE state = 'dead' AND kind IN ({marks})
+                AND media_id IN (SELECT id FROM media_files WHERE file_type = ?1)"
+        );
+        let mut values: Vec<rusqlite::types::Value> = vec![file_type.to_owned().into(), now_ms().into()];
+        values.extend(kinds.iter().map(|k| rusqlite::types::Value::from(k.as_str().to_owned())));
+        let n = self.pool.write(|conn| Ok(conn.execute(&sql, params_from_iter(values.iter()))?))?;
+        if n > 0 {
+            self.signal.notify();
+        }
+        Ok(n)
+    }
+
     pub fn get(&self, id: JobId) -> Result<Option<JobRecord>, JobsError> {
         Ok(self.pool.read(|conn| {
             Ok(conn

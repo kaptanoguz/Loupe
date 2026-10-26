@@ -228,6 +228,13 @@ fn retry_with_exponential_backoff_then_dead_letter() {
     assert_eq!(q.get(id2).unwrap().unwrap().state, JobState::Dead);
     // Kirası başka işçideyse sonuç yazılamaz.
     assert!(q.fail(id, "başkası", &busy).is_err());
+
+    // Araç sonradan kurulunca türe göre diriltme: yalnızca o dosya türü ve iş tipi.
+    e.pool.write(|c| Ok(c.execute("UPDATE media_files SET file_type = 'video' WHERE id = ?1", [m[1].0])?)).unwrap();
+    assert_eq!(q.retry_dead_for_file_type(&[JobKind::FaceDetect], "video").unwrap(), 0);
+    assert_eq!(q.retry_dead_for_file_type(&[JobKind::Thumb], "heic").unwrap(), 0);
+    assert_eq!(q.retry_dead_for_file_type(&[JobKind::Thumb, JobKind::MetadataFull], "video").unwrap(), 1);
+    assert_eq!(q.get(id2).unwrap().unwrap().state, JobState::Pending);
 }
 
 #[test]

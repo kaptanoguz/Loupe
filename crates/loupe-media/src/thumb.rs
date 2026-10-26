@@ -111,6 +111,8 @@ impl ThumbFormat {
 pub enum SourceKind {
     EmbeddedPreview,
     Decode,
+    /// Videodan `ffmpeg` ile çıkarılan kare.
+    VideoFrame,
 }
 
 impl SourceKind {
@@ -119,6 +121,7 @@ impl SourceKind {
         match self {
             Self::EmbeddedPreview => "embedded_preview",
             Self::Decode => "decode",
+            Self::VideoFrame => "video_frame",
         }
     }
 }
@@ -393,15 +396,53 @@ impl ThumbnailBackend for FallbackBackend {
     }
 }
 
+/// Videoyu bir kareye çevirip `inner` ile küçültür; diğer dosyalar doğrudan `inner`'a gider.
+#[derive(Debug)]
+pub struct VideoBackend {
+    pub inner: Box<dyn ThumbnailBackend>,
+}
+
+impl ThumbnailBackend for VideoBackend {
+    fn name(&self) -> &'static str {
+        self.inner.name()
+    }
+
+    fn render(
+        &self,
+        source: &Path,
+        sizes: &[ThumbSize],
+        orientation: Option<u8>,
+        format: ThumbFormat,
+    ) -> Result<Vec<EncodedThumb>, MediaError> {
+        if classify(source).file_type != MediaFileType::Video {
+            return self.inner.render(source, sizes, orientation, format);
+        }
+        let dir = std::env::temp_dir().join(format!("loupe-frame-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).map_err(MediaError::io("geçici dizin", &dir))?;
+        let frame = dir.join("frame.jpg");
+        // Kare ffmpeg tarafından zaten döndürüldü: EXIF yönlendirmesi uygulanmaz.
+        let result = crate::video::extract_frame(source, &frame).and_then(|()| {
+            let mut out = self.inner.render(&frame, sizes, Some(1), format)?;
+            for t in &mut out {
+                t.source_kind = SourceKind::VideoFrame;
+            }
+            Ok(out)
+        });
+        let _ignored = std::fs::remove_dir_all(&dir);
+        result
+    }
+}
+
 /// Derleme özelliklerine göre en iyi arka uç: `vips` açık ve kuruluysa vips,
 /// desteklemediği durumda saf Rust; değilse yalnızca saf Rust.
 #[must_use]
 pub fn default_backend() -> Box<dyn ThumbnailBackend> {
     #[cfg(feature = "vips")]
     if let Some(v) = VipsBackend::detect() {
-        return Box::new(FallbackBackend { primary: Box::new(v), fallback: Box::new(ImageBackend) });
+        let inner = Box::new(FallbackBackend { primary: Box::new(v), fallback: Box::new(ImageBackend) });
+        return Box::new(VideoBackend { inner });
     }
-    Box::new(ImageBackend)
+    Box::new(VideoBackend { inner: Box::new(ImageBackend) })
 }
 
 // ───────────────────────────────── Önbellek ─────────────────────────────────

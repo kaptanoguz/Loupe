@@ -8,6 +8,8 @@
 //! - [`raw`]: RAW içindeki gömülü JPEG önizlemeyi çıkarır.
 //! - [`thumb`]: yönlendirmesi düzeltilmiş, içerik adresli küçük resimler
 //!   (`sm` 256, `md` 768, `lg` 1920 px) ve [`thumb::ThumbnailBackend`] soyutlaması.
+//! - [`video`]: `ffprobe` ile video süresi, boyutu, çekim zamanı ve konumu;
+//!   `ffmpeg` ile küçük resim karesi.
 //! - [`protocol`]: Tauri `thumb://` özel şeması için saf Rust istek işleyicisi.
 
 pub mod error;
@@ -18,6 +20,7 @@ pub mod raw;
 pub mod sidecar;
 pub mod thumb;
 mod util;
+pub mod video;
 
 pub use error::MediaError;
 pub use geo::{GeoIndex, Place, format_dms};

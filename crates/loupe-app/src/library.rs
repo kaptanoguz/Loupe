@@ -25,7 +25,7 @@ use loupe_storage::{
     DateResolver, HashOptions, Importer, ImporterConfig, LibraryMarker, StorageError, VolumeProbe, WatchEvent,
     hash_file,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{AppError, AppResult};
 
@@ -62,6 +62,10 @@ pub struct LibraryDto {
     pub fs_type: Option<String>,
     pub managed: bool,
     pub primary: bool,
+    /// İçe aktarmanın varsayılan klasör düzeni.
+    pub layout_template: String,
+    /// `copy` | `move` | `hardlink`
+    pub default_import_mode: &'static str,
     pub media_count: u64,
     pub total_bytes: Option<i64>,
     pub free_bytes: Option<i64>,
@@ -69,6 +73,16 @@ pub struct LibraryDto {
 
 fn uuid_string(bytes: &[u8; 16]) -> String {
     uuid::Uuid::from_bytes(*bytes).hyphenated().to_string()
+}
+
+/// [`Libraries::update`] girdisi.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryPatch {
+    pub name: Option<String>,
+    pub layout_template: Option<String>,
+    pub default_import_mode: Option<String>,
+    pub primary: Option<bool>,
 }
 
 pub struct Libraries {
@@ -124,6 +138,36 @@ impl Libraries {
             .get(&id)
             .cloned()
             .ok_or_else(|| AppError::LibraryOffline(format!("kütüphane {} çevrimdışı ya da yönetilmiyor", id.0)))
+    }
+
+    /// Ayarlar → Kütüphaneler: ad, varsayılan klasör düzeni, varsayılan mod,
+    /// birincil. Verilmeyen alan değişmez.
+    pub fn update(&self, id: LibraryId, patch: &LibraryPatch) -> AppResult<LibraryDto> {
+        if let Some(name) = patch.name.as_deref().map(str::trim) {
+            if name.is_empty() || name.len() > 120 {
+                return Err(AppError::Invalid("kütüphane adı boş ya da çok uzun".into()));
+            }
+            self.pool.write(|c| library::rename(c, id, name))?;
+        }
+        if let Some(t) = patch.layout_template.as_deref().map(str::trim) {
+            crate::import::validate_layout(t)?;
+            self.pool.write(|c| library::set_layout(c, id, t))?;
+            if let Some(imp) = self.importers.lock().map_err(|_| AppError::Poisoned)?.get(&id) {
+                imp.lock().map_err(|_| AppError::Poisoned)?.set_layout_template(t);
+            }
+        }
+        if let Some(m) = patch.default_import_mode.as_deref() {
+            let mode: loupe_core::ImportMode =
+                m.parse().map_err(|_| AppError::Invalid(format!("içe aktarma modu: {m}")))?;
+            self.pool.write(|c| library::set_import_mode(c, id, mode))?;
+        }
+        if patch.primary == Some(true) {
+            self.pool.write(|c| library::set_primary(c, id))?;
+        }
+        self.list()?
+            .into_iter()
+            .find(|l| l.id == id.0)
+            .ok_or_else(|| AppError::Invalid(format!("kütüphane {} yok", id.0)))
     }
 
     /// Kütüphaneyi kataloğdan kaldırır; klasördeki dosyalara dokunmaz.
@@ -394,6 +438,8 @@ fn to_dto(l: &Library, root: Option<&PathBuf>, media_count: u64) -> LibraryDto {
         fs_type: l.fs_type.clone(),
         managed: l.is_managed,
         primary: l.is_primary,
+        layout_template: l.layout_template.clone(),
+        default_import_mode: l.default_import_mode.as_str(),
         media_count,
         total_bytes: l.total_bytes,
         free_bytes: l.free_bytes,

@@ -2,7 +2,7 @@
   import { onDestroy, onMount } from "svelte";
 
   import { type Backend, createBackend } from "./lib/api/backend";
-  import type { ImportMode, ImportSessionDto } from "./lib/api/types";
+  import type { ImportRequest, ImportSessionDto } from "./lib/api/types";
   import Events from "./lib/components/Events.svelte";
   import Grid from "./lib/components/Grid.svelte";
   import Inspector from "./lib/components/Inspector.svelte";
@@ -14,6 +14,7 @@
   import StatusBar from "./lib/components/StatusBar.svelte";
   import TrashDialog from "./lib/components/TrashDialog.svelte";
   import ViewHeader from "./lib/components/ViewHeader.svelte";
+  import ImportDialog, { type ImportSource } from "./lib/components/ImportDialog.svelte";
   import WifiModal from "./lib/components/WifiModal.svelte";
   import { LayoutEngine } from "./lib/layout/engine";
   import { Catalog, isPageView } from "./lib/state/catalog.svelte";
@@ -97,13 +98,27 @@
     return target?.id ?? null;
   }
 
-  async function startImport(mode: ImportMode): Promise<void> {
-    const libraryId = importTarget();
-    if (libraryId === null) return;
+  /** İçe aktarma penceresinin kaynağı; pencere hedefi, düzeni ve modu sorar. */
+  let importSource = $state<ImportSource | null>(null);
+
+  async function startImport(): Promise<void> {
+    if (importTarget() === null) return;
     try {
-      const source = await backend.pickImportSource();
-      if (!source) return;
-      track(await backend.startImport({ libraryId, source, mode }));
+      const path = await backend.pickImportSource();
+      if (!path) return;
+      importSource = { kind: "folder", path };
+      catalog.overlay = "import";
+    } catch (e) {
+      fail(e);
+    }
+  }
+
+  async function runImport(req: ImportRequest): Promise<void> {
+    try {
+      const s = await backend.startImport(req);
+      track(s);
+      const lib = catalog.sidebar?.libraries.find((l) => l.id === req.libraryId);
+      catalog.flash(`İçe aktarma başladı → ${lib?.name ?? "kütüphane"}${req.layout ? ` / ${req.layout}` : ""}`);
     } catch (e) {
       fail(e);
     }
@@ -141,8 +156,7 @@
 
   /** Kabloyla bağlı iPhone'un DCIM klasörünü kopyalar; aktarılmış olanlar özetle atlanır. */
   async function importIphone(): Promise<void> {
-    const libraryId = importTarget();
-    if (libraryId === null || searchingIphone) return;
+    if (importTarget() === null || searchingIphone) return;
     searchingIphone = true;
     try {
       const [phone] = await backend.findIphone();
@@ -150,7 +164,8 @@
         catalog.error = "iPhone bulunamadı: kabloyla bağlayın, kilidini açın ve \"Bu bilgisayara güven\" deyin.";
         return;
       }
-      track(await backend.startImport({ libraryId, source: phone.dcim, mode: "copy" }));
+      importSource = { kind: "iphone", path: phone.dcim };
+      catalog.overlay = "import";
     } catch (e) {
       fail(e);
     } finally {
@@ -170,7 +185,7 @@
     },
     { id: "people", label: "Kişiler", hint: "yüzleri adlandır, birleştir" },
     { id: "events", label: "Etkinlikler", hint: "ad ver, kilitle" },
-    { id: "settings", label: "Ayarlar", hint: "bulut, kurtarma anahtarı, doğrulama" },
+    { id: "settings", label: "Ayarlar", hint: "kütüphaneler, telefon, bulut, doğrulama, yapay zekâ" },
   ]);
 
   async function runCommand(id: CommandId): Promise<void> {
@@ -214,7 +229,7 @@
           void catalog.open({ kind: id });
           break;
         case "settings":
-          catalog.openSettings("cloud");
+          catalog.openSettings("libraries");
           break;
       }
       void catalog.refreshStatus();
@@ -290,6 +305,8 @@
   <WifiModal {catalog} />
 {:else if catalog.overlay === "settings"}
   <Settings {catalog} />
+{:else if catalog.overlay === "import" && importSource}
+  <ImportDialog {catalog} source={importSource} onPickSource={() => backend.pickImportSource()} onStart={runImport} />
 {:else if catalog.overlay === "trash"}
   <TrashDialog {catalog} ids={catalog.targetIds()} onConfirm={trashMedia} />
 {/if}

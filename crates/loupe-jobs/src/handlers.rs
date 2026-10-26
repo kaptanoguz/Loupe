@@ -150,10 +150,10 @@ impl MediaPipeline {
                     .ok_or_else(|| JobError::transient("CACHE_RACE", "küçük resim önbellekten silindi"))?;
                 let bytes = std::fs::read(&cached).map_err(|e| JobError::transient("IO", e.to_string()))?;
                 let (width, height) = webp_dimensions(&bytes)?;
-                let kind = if matches!(m.file_type, MediaFileType::Raw | MediaFileType::Dng) {
-                    SourceKind::EmbeddedPreview
-                } else {
-                    SourceKind::Decode
+                let kind = match m.file_type {
+                    MediaFileType::Raw | MediaFileType::Dng => SourceKind::EmbeddedPreview,
+                    MediaFileType::Video => SourceKind::VideoFrame,
+                    _ => SourceKind::Decode,
                 };
                 thumbnail::ThumbnailRow {
                     media_id: m.id,
@@ -171,7 +171,8 @@ impl MediaPipeline {
         if size == ThumbSize::Md && m.phash.is_none() {
             self.fill_phash(&m)?;
         }
-        if self.ai_followups && size == ThumbSize::Md {
+        // Yüz ve CLIP yalnızca fotoğraflar için (video karesi dizinlenmez).
+        if self.ai_followups && size == ThumbSize::Md && m.file_type != MediaFileType::Video {
             self.enqueue_ai(m.id, ctx)?;
         }
         Ok(())
@@ -204,6 +205,7 @@ impl MediaPipeline {
             aperture_f: meta.aperture_f,
             exposure_s: meta.exposure_s,
             iso: meta.iso,
+            duration_ms: meta.duration_ms,
         };
         self.pool.write(|c| media::apply_metadata(c, m.id, &update))?;
         // Ters coğrafi kodlama bellekte birkaç mikrosaniye: ayrı iş açmaya değmez.

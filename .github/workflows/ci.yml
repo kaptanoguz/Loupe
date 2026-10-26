@@ -65,8 +65,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: rustup show active-toolchain
-      # İsteğe bağlı libvips arka ucu.
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvips-tools
+      # İsteğe bağlı libvips arka ucu; video küçük resmi ve metadata için ffmpeg.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvips-tools ffmpeg
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: features

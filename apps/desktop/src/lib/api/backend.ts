@@ -28,6 +28,7 @@ import type {
   TrashResultDto,
   InspectorDetail,
   LibraryDto,
+  LibraryPatch,
   PairingQrDto,
   PaletteRequest,
   PaletteResult,
@@ -53,6 +54,9 @@ export interface Backend {
   listLibraries(): Promise<LibraryDto[]>;
   refreshLibraries(): Promise<LibraryDto[]>;
   startImport(req: ImportRequest): Promise<ImportSessionDto>;
+  updateLibrary(id: number, patch: LibraryPatch): Promise<LibraryDto>;
+  /** Medyayı sistemin varsayılan uygulamasında açar (video oynatıcı). */
+  openMedia(id: number): Promise<void>;
   importStatus(id: number): Promise<ImportSessionDto>;
   recentImports(limit?: number): Promise<ImportSessionDto[]>;
   cancelImport(id: number): Promise<boolean>;
@@ -153,6 +157,8 @@ export const tauriBackend: Backend = {
   listLibraries: () => call("list_libraries"),
   refreshLibraries: () => call("refresh_libraries"),
   startImport: (req) => call("start_import", { req }),
+  updateLibrary: (id, patch) => call("update_library", { id, patch }),
+  openMedia: (id) => call("open_media", { id }),
   importStatus: (id) => call("import_status", { id }),
   recentImports: (limit) => call("recent_imports", { limit }),
   cancelImport: (id) => call("cancel_import", { id }),

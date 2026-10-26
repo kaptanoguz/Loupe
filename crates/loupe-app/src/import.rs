@@ -42,6 +42,28 @@ pub struct ImportRequest {
     pub source: PathBuf,
     /// `copy` | `move` | `hardlink`
     pub mode: String,
+    /// Bu aktarıma özel klasör düzeni (ör. `iPhone/{yyyy}/{mm}`); yoksa
+    /// kütüphanenin varsayılanı.
+    #[serde(default)]
+    pub layout: Option<String>,
+}
+
+/// Klasör düzeni şablonunu doğrular: `{yyyy}`, `{mm}`, `{dd}` dışındaki
+/// parçalar düz klasör adıdır; boş, mutlak, `..` ya da gizli (`.` ile başlayan,
+/// taramaların görmediği) bileşen olamaz.
+pub fn validate_layout(template: &str) -> AppResult<()> {
+    let t = template.trim();
+    if t.is_empty() || t.len() > 200 {
+        return Err(AppError::Invalid("klasör düzeni boş ya da çok uzun".into()));
+    }
+    let sample =
+        loupe_storage::layout::CaptureTime { utc_ms: 0, tz_offset_min: None, source: loupe_core::TakenAtSource::Mtime };
+    let rel =
+        loupe_storage::layout::render_dir(t, &sample).map_err(|e| AppError::Invalid(format!("klasör düzeni: {e}")))?;
+    if rel.as_str().split('/').any(|p| p.starts_with('.') || p.contains(['{', '}'])) {
+        return Err(AppError::Invalid(format!("klasör düzeni geçersiz: {t}")));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -162,6 +184,10 @@ impl Imports {
         let mode: ImportMode = req.mode.parse().map_err(|_| AppError::Invalid(format!("import modu: {}", req.mode)))?;
         let lib = LibraryId(req.library_id);
         let importer = self.libraries.importer(lib)?;
+        let layout = req.layout.as_deref().map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned);
+        if let Some(l) = &layout {
+            validate_layout(l)?;
+        }
         let source = std::fs::canonicalize(&req.source)
             .map_err(AppError::io(format!("kaynak klasör {}", req.source.display())))?;
         if let Some(root) = self.libraries.root(lib)?
@@ -174,7 +200,11 @@ impl Imports {
         self.spawn(session, move |run| {
             this.run(session, run, &source, |path, catalog| {
                 let imp = importer.lock().map_err(|_| AppError::Poisoned)?;
-                Ok(match imp.import_file(catalog, path, mode, Some(session))? {
+                let out = match &layout {
+                    Some(l) => imp.import_file_with_layout(catalog, path, mode, Some(session), l)?,
+                    None => imp.import_file(catalog, path, mode, Some(session))?,
+                };
+                Ok(match out {
                     ImportOutcome::Imported { media_id, .. } => Some(media_id),
                     ImportOutcome::Duplicate { .. } => None,
                 })

@@ -279,11 +279,69 @@ describe("Ayarlar", () => {
     await waitFor(() => expect(within(dialog).getByText(/Eşleşiyor/)).toBeTruthy());
   });
 
+  it("kütüphaneler: klasör düzeni, varsayılan mod ve birincil", async () => {
+    const { container, backend } = setup();
+    const update = vi.spyOn(backend, "updateLibrary");
+    await ready(container);
+    await fireEvent.click(screen.getByLabelText("Ayarlar"));
+    const dialog = screen.getByRole("dialog", { name: "Ayarlar" });
+    const lib = within(dialog).getByRole("article", { name: "Fotoğraflar" });
+    expect(within(lib).getByText("birincil")).toBeTruthy();
+    expect(within(lib).getByText("/home/oguz/Resimler/Loupe/2025/08/14/IMG_1234.HEIC")).toBeTruthy();
+    await fireEvent.input(within(lib).getByLabelText("Alt klasör"), { target: { value: ".gizli" } });
+    expect(within(lib).getByText(/nokta ile başlayamaz/)).toBeTruthy();
+    await fireEvent.input(within(lib).getByLabelText("Alt klasör"), { target: { value: "Arşiv" } });
+    await fireEvent.click(within(lib).getByRole("button", { name: "Yıl / Ay" }));
+    expect(within(lib).getByText("/home/oguz/Resimler/Loupe/Arşiv/2025/08/IMG_1234.HEIC")).toBeTruthy();
+    await fireEvent.click(within(lib).getByRole("button", { name: "Kaydet" }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith(1, { layoutTemplate: "Arşiv/{yyyy}/{mm}" }));
+    await fireEvent.click(within(lib).getByRole("button", { name: "Taşı" }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith(1, { defaultImportMode: "move" }));
+    // Bağlı olmayan referans kütüphane birincil yapılamaz.
+    const ref = within(dialog).getByRole("article", { name: "Arşiv 2019" });
+    expect(within(ref).queryByRole("button", { name: "Birincil yap" })).toBeNull();
+  });
+
+  it("içe aktarma önce hedefi, düzeni ve modu sorar", async () => {
+    const { container, backend } = setup();
+    vi.spyOn(backend, "pickImportSource").mockResolvedValue("/media/kart/DCIM");
+    const start = vi.spyOn(backend, "startImport");
+    await ready(container);
+    await fireEvent.click(screen.getByRole("button", { name: "İçe Aktar" }));
+    const dialog = await screen.findByRole("dialog", { name: "İçe aktar" });
+    expect(start).not.toHaveBeenCalled();
+    expect(within(dialog).getByText("/media/kart/DCIM")).toBeTruthy();
+    await fireEvent.input(within(dialog).getByLabelText("Alt klasör (isteğe bağlı)"), { target: { value: "Kart" } });
+    await fireEvent.click(within(dialog).getByRole("button", { name: "Yıl" }));
+    await fireEvent.click(within(dialog).getByRole("button", { name: "Taşı" }));
+    expect(within(dialog).getByLabelText("Örnek hedef yol").textContent).toBe("/home/oguz/Resimler/Loupe/Kart/2025/DSC_0412.JPG");
+    await fireEvent.click(within(dialog).getByRole("button", { name: "İçe aktar" }));
+    await waitFor(() =>
+      expect(start).toHaveBeenCalledWith({ libraryId: 1, source: "/media/kart/DCIM", mode: "move", layout: "Kart/{yyyy}" }),
+    );
+  });
+
+  it("iPhone aktarımı alt klasör önerir ve yalnızca kopyalar", async () => {
+    const { container, backend } = setup();
+    vi.spyOn(backend, "findIphone").mockResolvedValue([{ udid: "0000-ABC", dcim: "/run/user/1000/gvfs/afc:host=0000-ABC/DCIM" }]);
+    const start = vi.spyOn(backend, "startImport");
+    await ready(container);
+    await fireEvent.click(screen.getByRole("button", { name: /iPhone'dan İçe Aktar/ }));
+    const dialog = await screen.findByRole("dialog", { name: "İçe aktar" });
+    expect(within(dialog).queryByRole("button", { name: "Taşı" })).toBeNull();
+    expect(within(dialog).getByLabelText("Örnek hedef yol").textContent).toBe(
+      "/home/oguz/Resimler/Loupe/iPhone/2025/08/14/IMG_1234.HEIC",
+    );
+    await fireEvent.click(within(dialog).getByRole("button", { name: "İçe aktar" }));
+    await waitFor(() => expect(start).toHaveBeenCalledWith(expect.objectContaining({ mode: "copy", layout: "iPhone/{yyyy}/{mm}/{dd}" })));
+  });
+
   it("bulut: sağlayıcıya göre alanlar, MB/s sınırı ve şifreli varsayılan", async () => {
     const { container, backend } = setup();
     await ready(container);
     await fireEvent.click(screen.getByLabelText("Ayarlar"));
     const dialog = screen.getByRole("dialog", { name: "Ayarlar" });
+    await fireEvent.click(within(dialog).getByRole("tab", { name: "Bulut" }));
     await waitFor(() => expect(within(dialog).getByText("B2 Yedek")).toBeTruthy());
     expect(within(dialog).getByText(/0600|Secret Service/)).toBeTruthy();
     await fireEvent.click(within(dialog).getByText("+ Hedef ekle"));

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import Play from "@lucide/svelte/icons/play";
+
   import { THUMB_RETRIES, THUMB_RETRY_MS } from "../design/layout";
   import { count } from "../format";
   import type { Catalog } from "../state/catalog.svelte";
@@ -10,6 +12,15 @@
   let { catalog }: Props = $props();
 
   const item = $derived(catalog.selectedItem);
+
+  async function play(): Promise<void> {
+    if (!item) return;
+    try {
+      await catalog.backend.openMedia(item.id);
+    } catch (e) {
+      catalog.fail(e);
+    }
+  }
   // Izgarada zaten yüklenmiş küçük boyut anında görünür; lg gelince üstüne geçer.
   const low = $derived(item ? catalog.backend.thumbUrl("sm", item.hash) : "");
   const highBase = $derived(item ? catalog.backend.thumbUrl("lg", item.hash) : "");
@@ -169,6 +180,16 @@
           class:invisible={loadedSrc !== high}
         />
       {/if}
+    {/if}
+    {#if item?.video}
+      <button
+        class="btn btn-primary absolute top-1/2 left-1/2 h-10 -translate-x-1/2 -translate-y-1/2 px-4"
+        onpointerdown={(e) => e.stopPropagation()}
+        onclick={play}
+        title="Sistemin video oynatıcısında aç"
+      >
+        <Play size={16} strokeWidth={1.5} />Oynat
+      </button>
     {/if}
   </div>
   <div class="data flex h-6 shrink-0 items-center justify-between border-t border-line bg-surface px-3 text-xs text-ink-2">

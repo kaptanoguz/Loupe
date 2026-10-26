@@ -91,7 +91,12 @@ impl Fx {
         let (lib, _) = self.core.add_library_root(&self.lib_root, Some("Fotoğraflar"), true).unwrap();
         let s = self
             .core
-            .start_import(&ImportRequest { library_id: lib.id, source: self.card.clone(), mode: "copy".into() })
+            .start_import(&ImportRequest {
+                library_id: lib.id,
+                source: self.card.clone(),
+                mode: "copy".into(),
+                layout: None,
+            })
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {

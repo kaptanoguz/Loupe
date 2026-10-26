@@ -9,8 +9,8 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use image::{DynamicImage, ImageBuffer, Rgb};
 use loupe_app::{
-    AppConfig, AppCore, Arrange, CullRequest, Grouping, ImportRequest, ImportSessionDto, SortDir, SortKey,
-    TimelineRequest, View,
+    AppConfig, AppCore, Arrange, CullRequest, Grouping, ImportRequest, ImportSessionDto, LibraryPatch, SortDir,
+    SortKey, TimelineRequest, View,
 };
 use loupe_core::{Blake3Hash, MediaId, TakenAtSource};
 use loupe_db::repo::{location, media};
@@ -74,7 +74,12 @@ impl Fx {
     fn import(&self, lib: i64) -> ImportSessionDto {
         let s = self
             .core
-            .start_import(&ImportRequest { library_id: lib, source: self.card.clone(), mode: "copy".into() })
+            .start_import(&ImportRequest {
+                library_id: lib,
+                source: self.card.clone(),
+                mode: "copy".into(),
+                layout: None,
+            })
             .unwrap();
         wait_done(&self.core, s.id)
     }
@@ -489,7 +494,12 @@ fn reference_library_is_indexed_in_place_and_watcher_events_apply() {
     // Yönetilmeyen kütüphaneye içe aktarma yapılamaz.
     let err = fx
         .core
-        .start_import(&ImportRequest { library_id: lib.id, source: fx.tmp.path().to_path_buf(), mode: "copy".into() })
+        .start_import(&ImportRequest {
+            library_id: lib.id,
+            source: fx.tmp.path().to_path_buf(),
+            mode: "copy".into(),
+            layout: None,
+        })
         .unwrap_err();
     assert_eq!(err.code(), "LIBRARY_OFFLINE");
 
@@ -713,4 +723,61 @@ fn trashing_photos_moves_files_and_sidecars_then_forgets_them() {
     assert!(day.join("KILITLI.JPG").is_file() && day.join("KILITLI.JPG.loupe.json").is_file());
     assert!(!fx.lib_root.join("KILITLI.JPG").exists());
     assert!(fx.all_ids().is_empty());
+}
+
+#[test]
+fn import_layout_and_library_settings() {
+    let fx = Fx::new();
+    fx.shoot_card();
+    let lib = fx.add_library();
+
+    // Aktarıma özel düzen: kütüphanenin varsayılanı değişmez.
+    let s = fx
+        .core
+        .start_import(&ImportRequest {
+            library_id: lib,
+            source: fx.card.clone(),
+            mode: "copy".into(),
+            layout: Some("iPhone/{yyyy}/{mm}".into()),
+        })
+        .unwrap();
+    assert_eq!(wait_done(&fx.core, s.id).done_files, 5);
+    assert!(fx.lib_root.join("iPhone/2025/10/IMG_0001.JPG").is_file());
+    assert!(fx.lib_root.join("iPhone/2025/09/IMG_0005.JPG").is_file());
+    for bad in ["", ".gizli/{yyyy}", "../{yyyy}", "/mutlak", "{yyyy}//{mm}", "{hh}"] {
+        let r = fx.core.start_import(&ImportRequest {
+            library_id: lib,
+            source: fx.card.clone(),
+            mode: "copy".into(),
+            layout: Some(bad.into()),
+        });
+        // Boş düzen = kütüphanenin varsayılanı.
+        assert_eq!(r.is_err(), !bad.is_empty(), "{bad}");
+        if let Ok(s) = r {
+            wait_done(&fx.core, s.id);
+        }
+    }
+
+    // Kütüphane ayarları.
+    let patch = LibraryPatch {
+        name: Some("Arşiv".into()),
+        layout_template: Some("{yyyy}".into()),
+        default_import_mode: Some("move".into()),
+        primary: Some(true),
+    };
+    let dto = fx.core.update_library(lib, &patch).unwrap();
+    assert_eq!((dto.name.as_str(), dto.layout_template.as_str(), dto.default_import_mode), ("Arşiv", "{yyyy}", "move"));
+    assert!(dto.primary);
+    let bad = LibraryPatch { layout_template: Some("../x".into()), ..LibraryPatch::default() };
+    assert!(fx.core.update_library(lib, &bad).is_err());
+    assert!(fx.core.update_library(lib, &LibraryPatch { name: Some(" ".into()), ..LibraryPatch::default() }).is_err());
+
+    // Yeni varsayılan düzen hemen geçerli.
+    write_jpeg(&fx.card.join("IMG_0099.JPG"), 64, 48, 99, 0);
+    let s = fx
+        .core
+        .start_import(&ImportRequest { library_id: lib, source: fx.card.clone(), mode: "copy".into(), layout: None })
+        .unwrap();
+    wait_done(&fx.core, s.id);
+    assert!(fx.lib_root.join("2025/IMG_0099.JPG").is_file());
 }

@@ -50,7 +50,7 @@
     </h1>
     <p class="text-sm text-ink-2">
       Dosyalar Çöp Kutusu'na taşınır ve Loupe'den çıkar. Fikrinizi değiştirirseniz dosya yöneticisinin Çöp Kutusu'ndan
-      geri alabilirsiniz; geri aldığınız klasörü yeniden içe aktarınca fotoğraflar kataloğa döner.
+      geri alabilirsiniz; Loupe açıkken geri gelen dosya kendiliğinden yeniden kataloglanır.
     </p>
     <div class="flex justify-end gap-2">
       <button class="btn" bind:this={cancelButton} disabled={busy} onclick={close}>Vazgeç</button>
