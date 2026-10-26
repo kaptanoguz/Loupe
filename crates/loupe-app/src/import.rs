@@ -188,7 +188,7 @@ impl Imports {
         if let Some(l) = &layout {
             validate_layout(l)?;
         }
-        let source = std::fs::canonicalize(&req.source)
+        let source = loupe_storage::fsutil::canonicalize(&req.source)
             .map_err(AppError::io(format!("kaynak klasör {}", req.source.display())))?;
         if let Some(root) = self.libraries.root(lib)?
             && source.starts_with(&root)

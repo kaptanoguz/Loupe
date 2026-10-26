@@ -30,28 +30,22 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
-    /// Gerçek kurulum: XDG dizinleri.
+    /// Gerçek kurulum: Linux'ta XDG dizinleri, macOS'ta `~/Library`, Windows'ta
+    /// `%LOCALAPPDATA%\Loupe` (bkz. [`loupe_ai::models::platform_dirs`]).
     pub fn from_env() -> AppResult<Self> {
-        let home = std::env::var_os("HOME").map(PathBuf::from);
-        let xdg = |var: &str, fallback: &str| -> AppResult<PathBuf> {
-            std::env::var_os(var)
-                .map(PathBuf::from)
-                .filter(|p| p.is_absolute())
-                .or_else(|| home.as_ref().map(|h| h.join(fallback)))
-                .map(|p| p.join("loupe"))
-                .ok_or_else(|| AppError::Invalid(format!("{var} ve HOME tanımsız")))
-        };
+        let (data_dir, cache_dir) = loupe_ai::models::platform_dirs()
+            .ok_or_else(|| AppError::Invalid("kullanıcı dizini bulunamadı (HOME / LOCALAPPDATA tanımsız)".into()))?;
         let device_name = std::fs::read_to_string("/etc/hostname")
             .ok()
+            .or_else(|| std::env::var("COMPUTERNAME").ok())
             .map(|s| s.trim().to_owned())
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "Loupe".to_owned());
-        let data_dir = xdg("XDG_DATA_HOME", ".local/share")?;
         Ok(Self {
             ai: AiMode::from_env(&data_dir),
             secret_service: true,
             data_dir,
-            cache_dir: xdg("XDG_CACHE_HOME", ".cache")?,
+            cache_dir,
             device_name,
             workers: Some(WorkerConfig::default()),
             watch: true,

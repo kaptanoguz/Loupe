@@ -2,6 +2,8 @@
 
 // Test yardımcıları #[test] dışında olduğu için clippy.toml muafiyeti onları kapsamaz.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+// Inode, hard link ve Unix izinleri üzerine kurulu; Windows'ta derlenmez.
+#![cfg(unix)]
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{Seek, SeekFrom, Write};
@@ -492,7 +494,15 @@ fn watcher_reports_external_changes_and_ignores_own_writes() {
     // Silme ve yeniden adlandırma.
     let renamed = ext_dir.join("yeni-ad.jpg");
     fs::rename(&ext, &renamed).unwrap();
+    // inotify eski/yeni yolu tek çift olarak verir; FSEvents (macOS) ve Windows'ta
+    // yeniden adlandırma ayrı Created/Removed olaylarına bölünebilir.
+    #[cfg(target_os = "linux")]
     wait_for(&rx, |e| *e == WatchEvent::Renamed { from: ext.clone(), to: renamed.clone() });
+    #[cfg(not(target_os = "linux"))]
+    wait_for(&rx, |e| {
+        *e == WatchEvent::Renamed { from: ext.clone(), to: renamed.clone() }
+            || *e == WatchEvent::Created(renamed.clone())
+    });
     fs::remove_file(&renamed).unwrap();
     wait_for(&rx, |e| *e == WatchEvent::Removed(renamed.clone()));
     watcher.stop();

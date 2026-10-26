@@ -1,7 +1,7 @@
 # Loupe — geliştirme, test ve Linux paketleme (RFC-001G §4).
 #
 #   make dev       arayüz + Tauri, sıcak yeniden yükleme (ONNX ve libvips açık)
-#   make build     sürüm ikilisi: target/release/loupe
+#   make build     sürüm ikilisi: target/release/loupe-photos
 #   make bundle    .deb ve .AppImage: target/release/bundle/{deb,appimage}/
 #   make models    AI modellerini indir ve doğrula (~/.local/share/loupe/models)
 #   make test      CI'daki denetimlerin tamamı
@@ -36,7 +36,7 @@ dev: node
 
 build: node
 	cd $(DESKTOP) && $(NPM) run tauri -- build --no-bundle --features $(FEATURES)
-	@echo "→ target/release/loupe"
+	@echo "→ target/release/loupe-photos"
 
 bundle: node
 	cd $(DESKTOP) && $(NPM) run tauri -- build --bundles deb,appimage --features $(FEATURES)

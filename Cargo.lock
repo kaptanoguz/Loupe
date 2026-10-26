@@ -3020,7 +3020,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "loupe-ai"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "blake3",
@@ -3049,7 +3049,7 @@ dependencies = [
 
 [[package]]
 name = "loupe-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "http",
  "if-addrs",
@@ -3077,7 +3077,7 @@ dependencies = [
 
 [[package]]
 name = "loupe-cloud"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "age",
  "async-trait",
@@ -3109,7 +3109,7 @@ dependencies = [
 
 [[package]]
 name = "loupe-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "thiserror 2.0.21",
  "unicode-normalization",
@@ -3117,7 +3117,7 @@ dependencies = [
 
 [[package]]
 name = "loupe-db"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "loupe-core",
@@ -3129,7 +3129,7 @@ dependencies = [
 
 [[package]]
 name = "loupe-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "image",
  "loupe-app",
@@ -3146,7 +3146,7 @@ dependencies = [
 
 [[package]]
 name = "loupe-jobs"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "image",
@@ -3161,7 +3161,7 @@ dependencies = [
 
 [[package]]
 name = "loupe-lan"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -3194,7 +3194,7 @@ dependencies = [
 
 [[package]]
 name = "loupe-media"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "http",
@@ -3215,7 +3215,7 @@ dependencies = [
 
 [[package]]
 name = "loupe-search"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "image",
@@ -3231,7 +3231,7 @@ dependencies = [
 
 [[package]]
 name = "loupe-storage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "image",
@@ -3244,6 +3244,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

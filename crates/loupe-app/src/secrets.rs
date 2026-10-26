@@ -13,6 +13,7 @@
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+#[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -56,7 +57,10 @@ impl FileSecretStore {
 
 fn ensure_private_dir(dir: &Path) -> AppResult<()> {
     fs::create_dir_all(dir).map_err(AppError::io(format!("dizin {}", dir.display())))?;
-    fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).map_err(AppError::io("dizin izinleri"))
+    // Windows'ta kullanıcı profilindeki dizin zaten yalnızca o kullanıcıya açıktır.
+    #[cfg(unix)]
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).map_err(AppError::io("dizin izinleri"))?;
+    Ok(())
 }
 
 /// `0600` dosyaya atomik yazar (geçici dosya + rename).
@@ -64,13 +68,11 @@ pub fn write_private(path: &Path, value: &[u8]) -> AppResult<()> {
     let dir = path.parent().ok_or_else(|| AppError::Invalid("dosya yolu".into()))?;
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("secret");
     let tmp = dir.join(format!(".{name}.tmp"));
-    let mut f = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&tmp)
-        .map_err(AppError::io(format!("{}", tmp.display())))?;
+    let mut opts = OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    opts.mode(0o600);
+    let mut f = opts.open(&tmp).map_err(AppError::io(format!("{}", tmp.display())))?;
     f.write_all(value).map_err(AppError::io("gizli değer yazma"))?;
     f.sync_all().map_err(AppError::io("gizli değer fsync"))?;
     drop(f);
@@ -260,10 +262,13 @@ mod tests {
         assert!(store.get("lan-identity").unwrap().is_none());
         store.set("lan-identity", "gizli").unwrap();
         assert_eq!(store.get("lan-identity").unwrap().unwrap().as_str(), "gizli");
-        let mode = fs::metadata(dir.path().join("secrets/lan-identity")).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600);
-        let dmode = fs::metadata(dir.path().join("secrets")).unwrap().permissions().mode();
-        assert_eq!(dmode & 0o777, 0o700);
+        #[cfg(unix)]
+        {
+            let mode = fs::metadata(dir.path().join("secrets/lan-identity")).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+            let dmode = fs::metadata(dir.path().join("secrets")).unwrap().permissions().mode();
+            assert_eq!(dmode & 0o777, 0o700);
+        }
         for bad in ["../x", "a/b", "", ".gizli"] {
             assert!(store.set(bad, "x").is_err(), "{bad}");
         }

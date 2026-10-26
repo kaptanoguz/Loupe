@@ -55,9 +55,19 @@ fn start_network(core: Arc<AppCore>) {
     });
 }
 
+/// Linux'ta /etc/hostname, Windows'ta COMPUTERNAME, macOS'ta `hostname` komutu.
 fn hostname() -> String {
+    let command = || {
+        std::process::Command::new("hostname")
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+    };
     std::fs::read_to_string("/etc/hostname")
         .ok()
+        .or_else(|| std::env::var("COMPUTERNAME").ok())
+        .or_else(command)
         .map(|s| s.trim().to_owned())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "loupe".to_owned())

@@ -16,6 +16,7 @@ pub mod fsutil;
 pub mod hash;
 pub mod import;
 pub mod layout;
+pub mod meta;
 pub mod verify;
 pub mod volume;
 pub mod watch;

@@ -1,7 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Loupe",
-  "version": "0.1.0",
+  "productName": "Loupe Photos",
+  "mainBinaryName": "loupe-photos",
+  "version": "0.2.0",
   "identifier": "app.loupe.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -40,21 +41,29 @@
       "appimage"
     ],
     "category": "Photography",
-    "shortDescription": "Yerel öncelikli fotoğraf kataloğu",
-    "longDescription": "Loupe, fotoğrafları kendi diskinizde tutan, yüz ve anlamsal aramayı çevrimdışı yapan, telefondan Wi-Fi ile kurulum gerektirmeden aktarım alan bir fotoğraf kataloğudur.",
+    "shortDescription": "Local-first photo catalog",
+    "longDescription": "Loupe keeps your photos on your own disks, runs face recognition and semantic search offline, and receives photos from your phone over Wi-Fi without installing an app.",
     "publisher": "Loupe",
-    "copyright": "© 2026 Loupe katkıcıları",
+    "copyright": "© 2026 Loupe contributors",
     "homepage": "https://github.com/kaptanoguz/Loupe",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
-      "icons/icon.png"
+      "icons/icon.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
     ],
     "linux": {
       "deb": {
         "section": "graphics",
         "priority": "optional",
+        "conflicts": [
+          "loupe (<< 1.0)"
+        ],
+        "replaces": [
+          "loupe (<< 1.0)"
+        ],
         "recommends": [
           "libvips-tools",
           "ffmpeg",

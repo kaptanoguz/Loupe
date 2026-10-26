@@ -6,9 +6,9 @@
 //! dosya başına ~200 ms sürer. Boyut başlıktan okunur, pHash `md` küçük resmi
 //! üretilince ondan hesaplanır.
 
+use crate::meta;
 use std::fs::File;
 use std::io::{self, Read};
-use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 use image::DynamicImage;
@@ -66,11 +66,7 @@ pub fn hash_file(path: &Path, opts: &HashOptions) -> Result<FileDigest, StorageE
         drop_page_cache(&file);
     }
     let after = std::fs::metadata(path).map_err(StorageError::io("stat", path))?;
-    if read != size
-        || after.len() != size
-        || after.mtime() != before.mtime()
-        || after.mtime_nsec() != before.mtime_nsec()
-    {
+    if read != size || after.len() != size || meta::mtime_ns(&after) != meta::mtime_ns(&before) {
         return Err(StorageError::SourceChanged(path.to_path_buf()));
     }
 
@@ -84,9 +80,9 @@ pub fn hash_file(path: &Path, opts: &HashOptions) -> Result<FileDigest, StorageE
         size,
         phash,
         dimensions,
-        mtime_ns: before.mtime().saturating_mul(1_000_000_000).saturating_add(before.mtime_nsec()),
-        inode: before.ino(),
-        device: before.dev(),
+        mtime_ns: meta::mtime_ns(&before),
+        inode: meta::inode(&before),
+        device: meta::device(&before),
     })
 }
 

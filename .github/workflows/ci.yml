@@ -77,6 +77,28 @@ jobs:
       - run: cargo test -p loupe-media --no-default-features --locked
       - run: cargo test -p loupe-lan --no-default-features --locked
 
+  # The Rust workspace must also compile on the platforms we ship installers for.
+  rust-cross:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: cross
+          cache-on-failure: true
+      - run: mkdir -p apps/desktop/dist
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo clippy -p loupe-desktop --features ort --locked -- -D warnings
+      - run: cargo test -p loupe-storage -p loupe-core --locked
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

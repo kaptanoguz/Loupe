@@ -120,15 +120,35 @@ pub enum FileState {
     Incomplete,
 }
 
-/// Varsayılan model dizini: `$XDG_DATA_HOME/loupe/models` (yoksa
-/// `~/.local/share/loupe/models`). Uygulama aynı yolu kullanır.
+/// Varsayılan model dizini: uygulama veri dizininin altındaki `models/`
+/// (Linux'ta `~/.local/share/loupe/models`). Uygulama aynı yolu kullanır.
 #[must_use]
 pub fn default_dir() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))?;
-    Some(base.join("loupe").join("models"))
+    platform_dirs().map(|(data, _)| data.join("models"))
+}
+
+/// Uygulamanın veri ve önbellek dizinleri.
+///
+/// - Linux: `$XDG_DATA_HOME/loupe` (`~/.local/share/loupe`), `$XDG_CACHE_HOME/loupe` (`~/.cache/loupe`)
+/// - macOS: `~/Library/Application Support/Loupe`, `~/Library/Caches/Loupe`
+/// - Windows: `%LOCALAPPDATA%\Loupe`, `%LOCALAPPDATA%\Loupe\cache`
+#[must_use]
+pub fn platform_dirs() -> Option<(PathBuf, PathBuf)> {
+    let env_dir = |var: &str| std::env::var_os(var).map(PathBuf::from).filter(|p| p.is_absolute());
+    if cfg!(windows) {
+        let base = env_dir("LOCALAPPDATA")
+            .or_else(|| env_dir("USERPROFILE").map(|h| h.join("AppData").join("Local")))?
+            .join("Loupe");
+        return Some((base.clone(), base.join("cache")));
+    }
+    let home = env_dir("HOME");
+    if cfg!(target_os = "macos") {
+        let lib = home?.join("Library");
+        return Some((lib.join("Application Support").join("Loupe"), lib.join("Caches").join("Loupe")));
+    }
+    let data = env_dir("XDG_DATA_HOME").or_else(|| home.as_ref().map(|h| h.join(".local/share")))?;
+    let cache = env_dir("XDG_CACHE_HOME").or_else(|| home.as_ref().map(|h| h.join(".cache")))?;
+    Some((data.join("loupe"), cache.join("loupe")))
 }
 
 pub fn invalid(m: impl Into<String>) -> AiError {

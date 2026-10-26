@@ -9,6 +9,7 @@
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Write;
+#[cfg(target_os = "linux")]
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::{Path, PathBuf};
 
@@ -143,9 +144,14 @@ impl Default for VolumeProbe {
 }
 
 impl VolumeProbe {
+    /// Bağlı dosya sistemleri. Linux'ta `mountinfo` okunur; macOS ve Windows'ta
+    /// (ya da `mountinfo` yoksa) [`system_mounts`] kullanılır.
     pub fn mounts(&self) -> Result<Vec<MountEntry>, StorageError> {
-        let text = fs::read_to_string(&self.mountinfo).map_err(StorageError::io("mountinfo okuma", &self.mountinfo))?;
-        parse_mountinfo(&text)
+        match fs::read_to_string(&self.mountinfo) {
+            Ok(text) => parse_mountinfo(&text),
+            Err(e) if cfg!(target_os = "linux") => Err(StorageError::io("mountinfo okuma", &self.mountinfo)(e)),
+            Err(_) => Ok(system_mounts()),
+        }
     }
 
     fn links(dir: &Path, hex_names: bool) -> Vec<DiskLink> {
@@ -154,10 +160,14 @@ impl VolumeProbe {
             .filter_map(|e| {
                 let raw = e.file_name().to_str()?.to_owned();
                 let target = fs::canonicalize(e.path()).ok()?;
+                #[cfg(target_os = "linux")]
                 let rdev = fs::metadata(&target)
                     .ok()
                     .filter(|m| m.file_type().is_block_device())
                     .map(|m| (rustix::fs::major(m.rdev()), rustix::fs::minor(m.rdev())));
+                // Aygıt numarası eşlemesi yalnızca /proc/self/mountinfo'nun Linux'ta var.
+                #[cfg(not(target_os = "linux"))]
+                let rdev = None;
                 let name = if hex_names { unescape_hex(&raw) } else { raw };
                 Some(DiskLink { name, target, rdev })
             })
@@ -187,7 +197,7 @@ impl VolumeProbe {
     /// Klasörün diskini bulur: en uzun eşleşen mount noktası; aynı uzunlukta
     /// birden çok varsa (üst üste mount) son bağlanan.
     pub fn resolve(&self, folder: &Path) -> Result<VolumeInfo, StorageError> {
-        let folder = fs::canonicalize(folder).map_err(StorageError::io("yol çözme", folder))?;
+        let folder = fsutil::canonicalize(folder).map_err(StorageError::io("yol çözme", folder))?;
         let mounts = self.mounts()?;
         let m = mounts
             .iter()
@@ -378,12 +388,82 @@ pub fn probe_capabilities(root: &Path) -> Result<Capabilities, StorageError> {
     let c = dir.join(format!("probe-{tag}-c"));
     File::create(&a).map_err(StorageError::io("yetenek denemesi", &a))?;
     let hardlink = fs::hard_link(&a, &b).is_ok();
+    #[cfg(unix)]
     let noreplace =
         rustix::fs::renameat_with(rustix::fs::CWD, &a, rustix::fs::CWD, &c, rustix::fs::RenameFlags::NOREPLACE).is_ok();
+    // Windows'ta üzerine yazmayan taşıma sabit bağlantıyla yapılır ([`fsutil::rename_noreplace`]).
+    #[cfg(not(unix))]
+    let noreplace = hardlink;
     for p in [&a, &b, &c] {
         let _ignored = fs::remove_file(p);
     }
     Ok(Capabilities { hardlink, noreplace })
+}
+
+/// `mountinfo` olmayan sistemlerde bağlı birimler.
+///
+/// - macOS: `mount` komutunun çıktısı (`/dev/disk3s1 on /Volumes/Arsiv (apfs, local, …)`).
+/// - Windows: var olan sürücü harfleri (`C:\`, `D:\`…).
+///
+/// Disk UUID'si bulunmaz; kütüphane son bilinen yolundaki `.loupe` işaretiyle tanınır.
+fn system_mounts() -> Vec<MountEntry> {
+    #[cfg(windows)]
+    {
+        (b'A'..=b'Z')
+            .map(|l| PathBuf::from(format!("{}:\\", char::from(l))))
+            .filter(|p| p.exists())
+            .enumerate()
+            .map(|(i, p)| MountEntry {
+                mount_id: u32::try_from(i).unwrap_or(0),
+                major: 0,
+                minor: 0,
+                root: "/".into(),
+                source: p.to_string_lossy().into_owned(),
+                mount_point: p,
+                fs_type: "ntfs".into(),
+            })
+            .collect()
+    }
+    #[cfg(not(windows))]
+    {
+        let out = std::process::Command::new("mount").stdin(std::process::Stdio::null()).output();
+        let text = out.map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+        let mut mounts = parse_bsd_mount(&text);
+        if mounts.is_empty() {
+            mounts.push(MountEntry {
+                mount_id: 0,
+                major: 0,
+                minor: 0,
+                root: "/".into(),
+                mount_point: PathBuf::from("/"),
+                fs_type: "unknown".into(),
+                source: "/".into(),
+            });
+        }
+        mounts
+    }
+}
+
+/// BSD/macOS `mount` çıktısı: `<kaynak> on <nokta> (<tür>, <seçenekler…>)`.
+pub fn parse_bsd_mount(text: &str) -> Vec<MountEntry> {
+    text.lines()
+        .enumerate()
+        .filter_map(|(i, line)| {
+            let (source, rest) = line.split_once(" on ")?;
+            let open = rest.rfind(" (")?;
+            let mount_point = PathBuf::from(&rest[..open]);
+            let fs_type = rest[open + 2..].split([',', ')']).next()?.trim().to_owned();
+            Some(MountEntry {
+                mount_id: u32::try_from(i).unwrap_or(0),
+                major: 0,
+                minor: 0,
+                root: "/".into(),
+                mount_point,
+                fs_type,
+                source: source.to_owned(),
+            })
+        })
+        .collect()
 }
 
 /// Tüm disklerin UUID → mount noktası eşlemesi (disk takıldı olayında hangi
@@ -414,6 +494,20 @@ mod tests {
         assert_eq!((m[1].major, m[1].minor, m[1].fs_type.as_str()), (8, 17, "exfat"));
         assert_eq!(m[2].source, "nas.local:/volume1/photos");
         assert!(parse_mountinfo("bozuk satır").is_err());
+    }
+
+    #[test]
+    fn parses_bsd_mount_output() {
+        let text = "\
+/dev/disk3s1s1 on / (apfs, sealed, local, read-only, journaled)
+/dev/disk5s2 on /Volumes/Arsiv 4TB (exfat, local, nodev, nosuid, noowners)
+//oguz@nas._smb._tcp.local/photos on /Volumes/photos (smbfs, nodev, nosuid, mounted by oguz)
+";
+        let m = parse_bsd_mount(text);
+        assert_eq!(m.len(), 3);
+        assert_eq!(m[1].mount_point, PathBuf::from("/Volumes/Arsiv 4TB"));
+        assert_eq!((m[1].fs_type.as_str(), m[1].source.as_str()), ("exfat", "/dev/disk5s2"));
+        assert_eq!(m[2].fs_type, "smbfs");
     }
 
     #[test]

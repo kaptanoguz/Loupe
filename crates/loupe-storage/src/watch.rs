@@ -53,7 +53,7 @@ impl LibraryWatcher {
         tx: Sender<WatchEvent>,
         expected: Option<Arc<ExpectedPaths>>,
     ) -> Result<Self, StorageError> {
-        let root = std::fs::canonicalize(root).map_err(StorageError::io("izleme kökü", root))?;
+        let root = crate::fsutil::canonicalize(root).map_err(StorageError::io("izleme kökü", root))?;
         let filter_root = root.clone();
         let handler = move |res: DebounceEventResult| match res {
             Ok(events) => {
