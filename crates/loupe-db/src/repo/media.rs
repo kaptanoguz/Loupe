@@ -219,6 +219,13 @@ pub fn set_verify_state(conn: &Connection, id: MediaId, state: VerifyState) -> R
     Ok(())
 }
 
+/// İçe aktarmadan sonra (küçük resimden) hesaplanan pHash; var olanı ezmez.
+pub fn fill_phash(conn: &Connection, id: MediaId, phash: PHash) -> Result<(), DbError> {
+    conn.prepare_cached("UPDATE media_files SET phash = ?2, updated_at = ?3 WHERE id = ?1 AND phash IS NULL")?
+        .execute(params![id.0, phash.to_db(), now_ms()])?;
+    Ok(())
+}
+
 /// pHash bant indeksleriyle yakın kopya adayları (Hamming ≤ `max_distance`, en çok 3
 /// için bant eşleşmesi tam kapsar). İfadeler şemadaki indekslerle birebir aynıdır.
 pub fn near_duplicates(conn: &Connection, phash: PHash, max_distance: u32) -> Result<Vec<(MediaId, u32)>, DbError> {

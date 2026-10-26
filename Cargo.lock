@@ -3153,6 +3153,7 @@ dependencies = [
  "loupe-core",
  "loupe-db",
  "loupe-media",
+ "loupe-storage",
  "rusqlite",
  "tempfile",
  "thiserror 2.0.21",

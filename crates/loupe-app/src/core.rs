@@ -168,6 +168,16 @@ impl AppCore {
         // Disk çevrimdışıyken verilen puanların sidecar'ları.
         culling::flush_dirty_sidecars(&core.libraries, &core.pool, 10_000)?;
         core.start_workers()?;
+        // İçe aktarma sürerken yalnızca ızgara küçük resmi üretilir; yüz, CLIP
+        // ve metadata aktarma bitince başlar.
+        let weak = Arc::downgrade(&core);
+        core.imports.set_busy_hook(move |busy| {
+            if let Some(c) = weak.upgrade()
+                && let Ok(Some(w)) = c.workers.lock().as_deref()
+            {
+                w.set_importing(busy);
+            }
+        });
         core.restart_watchers()?;
         core.scan_unscanned_libraries();
         // Model sonradan geldiyse eski fotoğraflar; her açılışta bir etkinlik kümelemesi.

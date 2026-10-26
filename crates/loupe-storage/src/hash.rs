@@ -1,6 +1,10 @@
 //! Tek geçişte içerik özeti: dosya bir kez okunur, her parça BLAKE3'e verilir;
 //! dosya pHash'i hesaplanabilen bir görüntüyse aynı parçalar belleğe de
 //! kopyalanır ve okuma bitince pHash bu tampondan çıkarılır (ikinci disk okuması yok).
+//!
+//! İçe aktarmada pHash varsayılan olarak kapalıdır: tam çözünürlükte çözmek
+//! dosya başına ~200 ms sürer. Boyut başlıktan okunur, pHash `md` küçük resmi
+//! üretilince ondan hesaplanır.
 
 use std::fs::File;
 use std::io::{self, Read};
@@ -27,7 +31,7 @@ pub struct HashOptions {
 
 impl Default for HashOptions {
     fn default() -> Self {
-        Self { phash: true, phash_max_bytes: 64 * 1024 * 1024, buffer_size: 1024 * 1024, drop_cache: false }
+        Self { phash: false, phash_max_bytes: 64 * 1024 * 1024, buffer_size: 1024 * 1024, drop_cache: false }
     }
 }
 
@@ -72,6 +76,7 @@ pub fn hash_file(path: &Path, opts: &HashOptions) -> Result<FileDigest, StorageE
 
     let (phash, dimensions) = match tee.as_deref().and_then(phash_from_bytes) {
         Some((p, d)) => (Some(p), Some(d)),
+        None if classify(path).decodable_for_phash() => (None, header_dimensions(path)),
         None => (None, None),
     };
     Ok(FileDigest {
@@ -83,6 +88,12 @@ pub fn hash_file(path: &Path, opts: &HashOptions) -> Result<FileDigest, StorageE
         inode: before.ino(),
         device: before.dev(),
     })
+}
+
+/// Görüntünün boyutu, pikselleri çözmeden (dosya az önce okunduğu için
+/// sayfa önbelleğinden gelir).
+fn header_dimensions(path: &Path) -> Option<(u32, u32)> {
+    image::ImageReader::open(path).ok()?.with_guessed_format().ok()?.into_dimensions().ok()
 }
 
 /// Okuyucuyu sonuna kadar BLAKE3'ler; `tee` verilirse baytları ona da ekler.

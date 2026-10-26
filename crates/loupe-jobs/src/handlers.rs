@@ -168,8 +168,22 @@ impl MediaPipeline {
             }
         };
         self.pool.write(|c| thumbnail::upsert(c, &row))?;
+        if size == ThumbSize::Md && m.phash.is_none() {
+            self.fill_phash(&m)?;
+        }
         if self.ai_followups && size == ThumbSize::Md {
             self.enqueue_ai(m.id, ctx)?;
+        }
+        Ok(())
+    }
+
+    /// pHash içe aktarmada hesaplanmaz (tam çözünürlükte çözmek yavaş);
+    /// 768 px `md` küçük resmi aynı DCT hash'i için fazlasıyla yeterli.
+    fn fill_phash(&self, m: &MediaFile) -> Result<(), JobError> {
+        let Some((cached, _)) = self.thumbnailer.cache().lookup(&m.blake3, ThumbSize::Md) else { return Ok(()) };
+        let bytes = std::fs::read(&cached).map_err(|e| JobError::transient("IO", e.to_string()))?;
+        if let Some((phash, _)) = loupe_storage::hash::phash_from_bytes(&bytes) {
+            self.pool.write(|c| media::fill_phash(c, m.id, phash))?;
         }
         Ok(())
     }

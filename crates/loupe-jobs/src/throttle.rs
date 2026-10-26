@@ -40,6 +40,7 @@ pub struct Throttle {
     paused: AtomicBool,
     mode: AtomicU8,
     user_active: AtomicBool,
+    importing: AtomicBool,
     general_workers: usize,
 }
 
@@ -49,6 +50,7 @@ impl Throttle {
             paused: AtomicBool::new(false),
             mode: AtomicU8::new(mode.to_u8()),
             user_active: AtomicBool::new(false),
+            importing: AtomicBool::new(false),
             general_workers,
         }
     }
@@ -75,6 +77,10 @@ impl Throttle {
         self.user_active.store(active, Ordering::SeqCst);
     }
 
+    pub(crate) fn set_importing(&self, importing: bool) {
+        self.importing.store(importing, Ordering::SeqCst);
+    }
+
     /// Moda göre aynı anda çalışabilecek genel işçi sayısı (en az 1).
     #[must_use]
     pub fn general_limit(&self) -> usize {
@@ -95,8 +101,9 @@ impl Throttle {
         if self.is_paused() || g >= self.general_limit() {
             return immediate;
         }
-        if self.user_active.load(Ordering::SeqCst) {
-            // Kullanıcı etkinken toplu tarama (Normal ve altı) bekler.
+        if self.user_active.load(Ordering::SeqCst) || self.importing.load(Ordering::SeqCst) {
+            // Kullanıcı etkinken ya da içe aktarma sürerken toplu işler (Normal
+            // ve altı) bekler; diski ve işlemciyi aktarma kullanır.
             return Priority::Normal.level() - 1;
         }
         Priority::Idle.level()
@@ -114,6 +121,10 @@ mod tests {
         assert_eq!(t.max_priority(Some(0)), 9);
         assert_eq!(t.max_priority(Some(2)), 0, "limit dışındaki işçi yalnızca acil iş alır");
         assert_eq!(t.max_priority(None), 0);
+        t.set_importing(true);
+        assert_eq!(t.max_priority(Some(0)), 4, "içe aktarma sürerken yalnızca ızgara küçük resmi");
+        t.set_importing(false);
+        assert_eq!(t.max_priority(Some(0)), 9);
         t.set_user_active(true);
         assert_eq!(t.max_priority(Some(0)), 4);
         t.set_paused(true);
