@@ -263,6 +263,7 @@ pub struct MetadataUpdate {
     pub aperture_f: Option<f64>,
     pub exposure_s: Option<f64>,
     pub iso: Option<u32>,
+    pub duration_ms: Option<i64>,
 }
 
 pub fn apply_metadata(conn: &Connection, id: MediaId, m: &MetadataUpdate) -> Result<(), DbError> {
@@ -285,7 +286,7 @@ pub fn apply_metadata(conn: &Connection, id: MediaId, m: &MetadataUpdate) -> Res
             camera_make = COALESCE(?11, camera_make), camera_model = COALESCE(?12, camera_model),
             lens_model = COALESCE(?13, lens_model), focal_length_mm = COALESCE(?14, focal_length_mm),
             aperture_f = COALESCE(?15, aperture_f), exposure_s = COALESCE(?16, exposure_s),
-            iso = COALESCE(?17, iso), updated_at = ?18
+            iso = COALESCE(?17, iso), updated_at = ?18, duration_ms = COALESCE(?19, duration_ms)
           WHERE id = ?1",
         params![
             id.0,
@@ -305,7 +306,8 @@ pub fn apply_metadata(conn: &Connection, id: MediaId, m: &MetadataUpdate) -> Res
             m.aperture_f,
             m.exposure_s,
             m.iso,
-            now_ms()
+            now_ms(),
+            m.duration_ms
         ],
     )?;
     if n == 0 { Err(DbError::NotFound { entity: "medya", id: id.0 }) } else { Ok(()) }

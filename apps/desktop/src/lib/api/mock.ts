@@ -3,6 +3,7 @@
  * Deterministik: aynı tohum aynı kataloğu üretir. `?mock=100000` ile büyük
  * kütüphane davranışı (sanal kaydırma, düzen süresi) Tauri olmadan denenir.
  */
+import { layoutError } from "../importLayout";
 import type { Backend } from "./backend";
 import type {
   AddedLibrary,
@@ -29,6 +30,7 @@ import type {
   TrashResultDto,
   InspectorDetail,
   LibraryDto,
+  LibraryPatch,
   PairingQrDto,
   PaletteRequest,
   PaletteResult,
@@ -178,6 +180,8 @@ export class MockBackend implements Backend {
         fsType: "ext4",
         managed: true,
         primary: true,
+        layoutTemplate: "{yyyy}/{mm}/{dd}",
+        defaultImportMode: "copy",
         mediaCount: count,
         totalBytes: 1_000_204_886_016,
         freeBytes: 412_316_860_416,
@@ -195,6 +199,8 @@ export class MockBackend implements Backend {
         fsType: "exfat",
         managed: false,
         primary: false,
+        layoutTemplate: "{yyyy}/{mm}/{dd}",
+        defaultImportMode: "copy",
         mediaCount: 0,
         totalBytes: null,
         freeBytes: null,
@@ -531,6 +537,21 @@ export class MockBackend implements Backend {
     const lib = this.libraries.find((l) => l.id === id);
     this.libraries = this.libraries.filter((l) => l.id !== id);
     return lib?.mediaCount ?? 0;
+  }
+  async openMedia(): Promise<void> {}
+  async updateLibrary(id: number, patch: LibraryPatch): Promise<LibraryDto> {
+    const lib = this.libraries.find((l) => l.id === id);
+    if (!lib) throw new Error(`kütüphane ${id} yok`);
+    if (patch.layoutTemplate !== undefined && layoutError(patch.layoutTemplate) !== null) {
+      throw new Error("klasör düzeni geçersiz");
+    }
+    if (patch.primary) for (const l of this.libraries) l.primary = l.id === id;
+    Object.assign(lib, {
+      name: patch.name?.trim() || lib.name,
+      layoutTemplate: patch.layoutTemplate?.trim() ?? lib.layoutTemplate,
+      defaultImportMode: patch.defaultImportMode ?? lib.defaultImportMode,
+    });
+    return { ...lib };
   }
   async startImport(req: ImportRequest): Promise<ImportSessionDto> {
     return {

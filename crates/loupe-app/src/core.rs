@@ -168,6 +168,10 @@ impl AppCore {
         // Disk çevrimdışıyken verilen puanların sidecar'ları.
         culling::flush_dirty_sidecars(&core.libraries, &core.pool, 10_000)?;
         core.start_workers()?;
+        // ffmpeg sonradan kurulduysa daha önce başarısız olan video işleri yeniden denenir.
+        if core.cfg.workers.is_some() && loupe_media::video::available() {
+            let _requeued = core.queue.retry_dead_for_file_type(&[JobKind::Thumb, JobKind::MetadataFull], "video");
+        }
         // İçe aktarma sürerken yalnızca ızgara küçük resmi üretilir; yüz, CLIP
         // ve metadata aktarma bitince başlar.
         let weak = Arc::downgrade(&core);
@@ -324,6 +328,11 @@ impl AppCore {
         self.libraries.list()
     }
 
+    /// Ayarlar → Kütüphaneler: ad, klasör düzeni, varsayılan mod, birincil.
+    pub fn update_library(&self, id: i64, patch: &crate::library::LibraryPatch) -> AppResult<LibraryDto> {
+        self.libraries.update(LibraryId(id), patch)
+    }
+
     /// Klasörü Loupe'den kaldırır: kataloğdaki kayıtları, yüzleri, vektörleri
     /// ve işleri silinir; diskteki dosyalara dokunulmaz. Telefon aktarımı bu
     /// kütüphaneye yazıyorsa LAN sunucusu durdurulur (`true` döner, çağıran
@@ -351,6 +360,26 @@ impl AppCore {
         .await
         .map_err(|e| AppError::Join(e.to_string()))??;
         Ok((removed, lan_stopped))
+    }
+
+    /// Medyayı sistemin varsayılan uygulamasında açar (video oynatıcı vb.).
+    pub fn open_media(&self, id: i64) -> AppResult<()> {
+        let m = self
+            .pool
+            .read(|c| loupe_db::repo::media::get(c, MediaId(id)))?
+            .ok_or_else(|| AppError::Invalid(format!("medya {id} yok")))?;
+        let path = self
+            .libraries
+            .media_path(&m)?
+            .ok_or_else(|| AppError::LibraryOffline("dosyanın diski bağlı değil".into()))?;
+        std::process::Command::new("xdg-open")
+            .arg(&path)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(AppError::io("xdg-open çalıştırılamadı"))?;
+        Ok(())
     }
 
     /// Seçili fotoğrafları diskten siler: Çöp Kutusu'na taşır ve kataloğdan çıkarır.

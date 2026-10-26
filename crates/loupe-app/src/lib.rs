@@ -34,7 +34,7 @@ pub use culling::{CullRequest, CullResult};
 pub use error::{AppError, AppResult};
 pub use import::{ImportRequest, ImportSessionDto};
 pub use inspector::{Histogram, InspectorDetail};
-pub use library::LibraryDto;
+pub use library::{LibraryDto, LibraryPatch};
 pub use loupe_search::SearchQuery;
 pub use models::{ModelJobDto, ModelsDto};
 pub use moments::EventCard;

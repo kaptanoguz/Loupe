@@ -125,6 +125,18 @@ async fn remove_library(state: State<'_, Desktop>, id: i64) -> Cmd<u64> {
     Ok(removed)
 }
 
+/// Kütüphane ayarlarını değiştirir (ad, klasör düzeni, varsayılan mod, birincil).
+#[tauri::command]
+async fn update_library(state: State<'_, Desktop>, id: i64, patch: loupe_app::LibraryPatch) -> Cmd<LibraryDto> {
+    blocking(&state, move |c| c.update_library(id, &patch)).await
+}
+
+/// Videoyu (ya da herhangi bir medyayı) sistemin varsayılan uygulamasında açar.
+#[tauri::command]
+async fn open_media(state: State<'_, Desktop>, id: i64) -> Cmd<()> {
+    blocking(&state, move |c| c.open_media(id)).await
+}
+
 /// Seçili fotoğrafları Çöp Kutusu'na taşır (arayüz önce onay ister).
 #[tauri::command]
 async fn trash_media(state: State<'_, Desktop>, ids: Vec<i64>) -> Cmd<loupe_app::trash::TrashResultDto> {
@@ -481,6 +493,8 @@ pub fn wire<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             pick_import_source,
             find_iphone,
             remove_library,
+            update_library,
+            open_media,
             trash_media,
             list_libraries,
             refresh_libraries,

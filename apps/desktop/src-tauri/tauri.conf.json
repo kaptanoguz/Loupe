@@ -57,6 +57,7 @@
         "priority": "optional",
         "recommends": [
           "libvips-tools",
+          "ffmpeg",
           "gnome-keyring"
         ]
       },

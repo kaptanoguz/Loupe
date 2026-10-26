@@ -44,8 +44,8 @@ export interface Heading {
   input?: string;
 }
 
-export type Overlay = "palette" | "wifi" | "settings" | "trash" | null;
-export type SettingsTab = "cloud" | "encryption" | "verify" | "ai";
+export type Overlay = "palette" | "wifi" | "settings" | "trash" | "import" | null;
+export type SettingsTab = "libraries" | "phone" | "cloud" | "encryption" | "verify" | "ai";
 
 export const DEFAULT_ARRANGE: Arrange = { sort: "taken", dir: "desc", grouping: "day" };
 const ARRANGE_KEY = "loupe.arrange";
@@ -104,7 +104,7 @@ export class Catalog {
   /** Başarılı işlem notu (hata değil); kısa süre sonra kaybolur. */
   notice = $state<string | null>(null);
   overlay = $state<Overlay>(null);
-  settingsTab = $state<SettingsTab>("cloud");
+  settingsTab = $state<SettingsTab>("libraries");
   heading = $state.raw<Heading | null>(null);
   /** Son düzen hesabının süresi (ms), durum çubuğunda. */
   layoutMs = $state(0);

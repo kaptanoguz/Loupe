@@ -51,6 +51,8 @@ pub struct MediaMetadata {
     pub taken_at: Option<TakenAt>,
     pub gps: Option<GpsPosition>,
     pub software: Option<String>,
+    /// Video süresi.
+    pub duration_ms: Option<i64>,
 }
 
 impl MediaMetadata {
@@ -74,6 +76,9 @@ impl MediaMetadata {
 /// Dosyadan metadata okur. EXIF içermeyen dosya hata değildir: boş metadata
 /// (ve çözülebilen biçimlerde başlıktan okunan boyutlar) döner.
 pub fn read_metadata(path: &Path) -> Result<MediaMetadata, MediaError> {
+    if classify(path).file_type == MediaFileType::Video {
+        return crate::video::probe(path);
+    }
     let file = File::open(path).map_err(MediaError::io("okuma için açma", path))?;
     let mut reader = BufReader::new(file);
     let parsed = exif::Reader::new()
@@ -153,6 +158,7 @@ pub fn from_exif(ex: &Exif) -> MediaMetadata {
         taken_at: taken_at(ex),
         gps,
         software: ascii(ex, Tag::Software),
+        duration_ms: None,
     }
 }
 

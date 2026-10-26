@@ -199,6 +199,30 @@ impl Importer {
         self.root.join(LOUPE_DIR).join(LAN_STAGING_DIR)
     }
 
+    /// [`Self::import_file`] ile aynı, ama klasör düzeni bu oturuma özeldir
+    /// (ör. `iPhone/{yyyy}/{mm}`); kütüphanenin varsayılanı değişmez.
+    pub fn import_file_with_layout<C: ImportCatalog>(
+        &self,
+        catalog: &mut C,
+        src: &Path,
+        mode: ImportMode,
+        session: Option<ImportSessionId>,
+        layout: &str,
+    ) -> Result<ImportOutcome, StorageError> {
+        self.import_inner(catalog, src, mode, session, mode.into(), Some(layout))
+    }
+
+    /// Kütüphanenin varsayılan klasör düzeni (`libraries.layout_template`).
+    #[must_use]
+    pub fn layout_template(&self) -> &str {
+        &self.cfg.layout_template
+    }
+
+    /// Varsayılan klasör düzenini değiştirir (yalnızca sonraki aktarımlar).
+    pub fn set_layout_template(&mut self, template: &str) {
+        template.clone_into(&mut self.cfg.layout_template);
+    }
+
     /// [`Self::import_file`] ile aynı, ama `media_files.placement` değeri açıkça
     /// verilir (LAN'dan gelen dosya `Placement::Lan` ve `ImportMode::Move` ile).
     pub fn import_file_as<C: ImportCatalog>(
@@ -208,6 +232,18 @@ impl Importer {
         mode: ImportMode,
         session: Option<ImportSessionId>,
         placement: Placement,
+    ) -> Result<ImportOutcome, StorageError> {
+        self.import_inner(catalog, src, mode, session, placement, None)
+    }
+
+    fn import_inner<C: ImportCatalog>(
+        &self,
+        catalog: &mut C,
+        src: &Path,
+        mode: ImportMode,
+        session: Option<ImportSessionId>,
+        placement: Placement,
+        layout: Option<&str>,
     ) -> Result<ImportOutcome, StorageError> {
         let src_meta = fs::symlink_metadata(src).map_err(StorageError::io("stat", src))?;
         if !src_meta.is_file() {
@@ -230,7 +266,7 @@ impl Importer {
         }
 
         let capture = self.dates.resolve(&src, &src_meta);
-        let dir_rel = render_dir(&self.cfg.layout_template, &capture)?;
+        let dir_rel = render_dir(layout.unwrap_or(&self.cfg.layout_template), &capture)?;
         let same_fs = digest.device == self.root_dev;
 
         // 3. staged
