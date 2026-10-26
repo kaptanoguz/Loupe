@@ -60,7 +60,8 @@ fn commands_round_trip_through_ipc() {
             .unwrap();
     let lib = added["library"]["id"].as_i64().unwrap();
     assert_eq!(added["library"]["state"], "online");
-    assert!(added["scan"].is_null());
+    // Mevcut fotoğraflar için yerinde tarama (klasör boş).
+    assert!(added["scan"]["id"].is_i64());
 
     let session =
         call(&w, "start_import", json!({ "req": { "libraryId": lib, "source": card, "mode": "copy" } })).unwrap();

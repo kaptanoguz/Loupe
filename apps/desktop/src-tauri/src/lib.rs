@@ -21,8 +21,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{Manager, Runtime, State};
 use tauri_plugin_dialog::DialogExt;
 
-/// LAN sunucusu tüm arayüzlerde, sistemin verdiği bir portta dinler (mDNS duyurur).
-pub const LAN_BIND: &str = "0.0.0.0:0";
+/// LAN sunucusu tüm arayüzlerde sabit portta dinler (doluysa sistemin verdiği porta düşer; mDNS duyurur).
+pub const LAN_BIND: &str = "0.0.0.0:47123";
 
 pub struct Desktop {
     pub core: Arc<AppCore>,
