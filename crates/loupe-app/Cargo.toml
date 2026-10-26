@@ -10,6 +10,8 @@ repository.workspace = true
 default = []
 # Gerçek ONNX modelleri (yüz, CLIP). Kapalıyken AI `off` ya da `LOUPE_AI=mock`.
 ort = ["loupe-ai/ort"]
+# Küçük resimler için libvips (`vipsthumbnail`): HEIC/AVIF ve hızlı küçültme.
+vips = ["loupe-media/vips"]
 
 [dependencies]
 http.workspace = true

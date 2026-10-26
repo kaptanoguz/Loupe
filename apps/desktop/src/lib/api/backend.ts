@@ -9,6 +9,7 @@ import { MockBackend } from "./mock";
 import type {
   AddedLibrary,
   AiStatusDto,
+  ModelsDto,
   AppErrorDto,
   CloudSettingsDto,
   CloudTargetInput,
@@ -83,6 +84,10 @@ export interface Backend {
   aiStatus(): Promise<AiStatusDto>;
   setPaused(paused: boolean): Promise<AiStatusDto>;
   setResourceMode(mode: ResourceMode): Promise<AiStatusDto>;
+  modelsStatus(): Promise<ModelsDto>;
+  /** Arka planda indirir; ilerleme `modelsStatus` ile yoklanır. */
+  modelsInstall(): Promise<ModelsDto>;
+  modelsCancel(): Promise<ModelsDto>;
 
   pairingQr(): Promise<PairingQrDto>;
   cancelPairing(): Promise<void>;
@@ -174,6 +179,9 @@ export const tauriBackend: Backend = {
   aiStatus: () => call("ai_status"),
   setPaused: (paused) => call("set_paused", { paused }),
   setResourceMode: (mode) => call("set_resource_mode", { mode }),
+  modelsStatus: () => call("models_status"),
+  modelsInstall: () => call("models_install"),
+  modelsCancel: () => call("models_cancel"),
 
   pairingQr: () => call("pairing_qr"),
   cancelPairing: () => call("cancel_pairing"),

@@ -147,6 +147,12 @@ fn commands_round_trip_through_ipc() {
     let people = call(&w, "list_people", json!({})).unwrap();
     assert_eq!(people["named"].as_array().unwrap().len(), 0);
     assert!(call(&w, "list_events", json!({})).unwrap().is_array());
+    let models = call(&w, "models_status", json!({})).unwrap();
+    assert_eq!(models["ready"], false);
+    assert!(
+        models["files"].as_array().unwrap().iter().any(|f| f["file"] == "scrfd_10g.onnx" && f["state"] == "missing")
+    );
+    assert_eq!(models["job"]["running"], false);
     let ai = call(&w, "ai_status", json!({})).unwrap();
     assert_eq!(ai["mode"], "off");
     assert_eq!(call(&w, "set_resource_mode", json!({ "mode": "quiet" })).unwrap()["resourceMode"], "quiet");

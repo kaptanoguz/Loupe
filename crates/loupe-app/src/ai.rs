@@ -3,7 +3,8 @@
 //!
 //! Mod açılışta bir kez seçilir ([`AiMode::from_env`]):
 //! - `onnx`: `ort` özelliğiyle derlenmiş ve `$XDG_DATA_HOME/loupe/models/`
-//!   altında dört model ile tokenizer var.
+//!   altında dört model ile tokenizer var (Ayarlar → Yapay Zekâ ya da
+//!   `make models` indirir; ONNX Runtime da aynı dizine gelir).
 //! - `mock`: `LOUPE_AI=mock` (gösterim ve uçtan uca testler; deterministik).
 //! - `off`: model yok. Etkinlik kümelemesi (model gerektirmez) yine çalışır;
 //!   yüz ve CLIP işleri sessizce atlanır ve modeller gelince yeniden kuyruğa
@@ -122,7 +123,10 @@ impl AiRuntime {
             clip_text: dir.join(MODEL_FILES[3]),
             tokenizer: dir.join(MODEL_FILES[4]),
         };
-        let built = init_runtime(None).and_then(|()| {
+        // `ORT_DYLIB_PATH` yoksa model yöneticisinin indirdiği kütüphane.
+        let bundled = dir.join(crate::models::RUNTIME_FILE);
+        let lib = (std::env::var_os("ORT_DYLIB_PATH").is_none() && bundled.is_file()).then_some(bundled.as_path());
+        let built = init_runtime(lib).and_then(|()| {
             let reaper = loupe_ai::IdleReaper::start(std::time::Duration::from_secs(15))?;
             let e = engine(&paths, OnnxConfig::default(), Some(&reaper))?;
             Ok((e, reaper))

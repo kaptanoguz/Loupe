@@ -141,6 +141,25 @@ fn decode32(s: &str, what: &str) -> Result<[u8; 32], LanError> {
 }
 
 impl PairingPayload {
+    /// Telefon kamerasının açabileceği QR adresi (RFC-001G):
+    /// `https://<adres>:<port>/m#t=<belirteç>`. Belirteç parça kısmındadır;
+    /// tarayıcı onu istek satırına koymaz, sayfa gövdede gönderir. Birden çok
+    /// adres varsa özel IPv4 adresi seçilir (telefonlar çoğunlukla oradadır).
+    #[must_use]
+    pub fn web_url(&self) -> Option<String> {
+        let pick = self
+            .addrs
+            .iter()
+            .find(|a| matches!(a, IpAddr::V4(v4) if v4.is_private()))
+            .or_else(|| self.addrs.iter().find(|a| !a.is_loopback()))
+            .or_else(|| self.addrs.first())?;
+        let host = match pick {
+            IpAddr::V4(v4) => v4.to_string(),
+            IpAddr::V6(v6) => format!("[{v6}]"),
+        };
+        Some(format!("https://{host}:{}/m#t={}", self.port, self.token))
+    }
+
     #[must_use]
     pub fn to_uri(&self) -> String {
         let addrs: Vec<String> = self.addrs.iter().map(ToString::to_string).collect();

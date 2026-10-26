@@ -18,6 +18,8 @@ path = "src/main.rs"
 default = []
 # Gerçek yüz ve CLIP modelleri (ONNX Runtime çalışma anında yüklenir).
 ort = ["loupe-app/ort"]
+# libvips küçük resim arka ucu (çalışma anında `vipsthumbnail` yoksa saf Rust'a düşer).
+vips = ["loupe-app/vips"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

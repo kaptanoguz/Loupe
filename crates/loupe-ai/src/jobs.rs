@@ -35,6 +35,8 @@ impl From<AiError> for JobError {
             AiError::Dimension { .. } => Self::permanent("DIMENSION", e.to_string()),
             AiError::InvalidInput(_) => Self::permanent("INVALID_INPUT", e.to_string()),
             AiError::NotFound { .. } => Self::permanent("NOT_FOUND", e.to_string()),
+            AiError::Io(_) | AiError::Download { .. } | AiError::Cancelled => Self::transient("IO", e.to_string()),
+            AiError::Verify { .. } => Self::permanent("VERIFY", e.to_string()),
         }
     }
 }

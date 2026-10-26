@@ -387,10 +387,43 @@ export interface AiStatusDto {
   images: number;
 }
 
+export type ModelFileState = "missing" | "verified" | "corrupt" | "unpinned";
+
+export interface ModelFileDto {
+  file: string;
+  /** `face_detect` | `face_embed` | `clip_image` | `clip_text` | `tokenizer` | `runtime` */
+  role: string;
+  state: ModelFileState;
+  size: number | null;
+  sha256: string | null;
+  license: string | null;
+}
+
+export interface ModelJobDto {
+  running: boolean;
+  source: string | null;
+  phase: "resolve" | "download" | "verify" | "extract" | "done" | null;
+  done: number;
+  total: number;
+  installed: string[];
+  failed: { source: string; files: string[]; reason: string }[];
+  error: string | null;
+}
+
+export interface ModelsDto {
+  dir: string;
+  files: ModelFileDto[];
+  ready: boolean;
+  runtime: boolean;
+  onnxBuild: boolean;
+  restartNeeded: boolean;
+  job: ModelJobDto;
+}
+
 // ───────────────────────────── Wi-Fi eşleştirme ─────────────────────────────
 
 export interface PairingQrDto {
-  /** Tek kullanımlık belirteç içerir; günlüğe yazılmaz. */
+  /** `https://<adres>:<port>/m#t=…`: kamera tarayıcıda açar. Tek kullanımlık belirteç içerir. */
   uri: string;
   /** Yalnızca `<rect>` ve `<path>`. */
   svg: string;
@@ -399,6 +432,8 @@ export interface PairingQrDto {
   addrs: string[];
   port: number;
   name: string;
+  /** Sunucu sertifikasının SHA-256 parmak izi (`AB:CD:…`). */
+  fingerprint: string;
 }
 
 export type ConflictPolicy = "ask_user" | "replace_with_newer" | "keep_both" | "skip";
@@ -412,6 +447,8 @@ export interface DeviceDto {
   lastSeenAt: number | null;
   lastAddress: string | null;
   revoked: boolean;
+  /** `app` (mTLS) | `web` (tarayıcı oturumu). */
+  kind: "app" | "web";
   received: number;
 }
 

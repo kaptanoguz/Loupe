@@ -15,7 +15,7 @@ use loupe_app::{
     AiMode, AppConfig, AppCore, CloudTargetInput, Grouping, ImportRequest, ImportSessionDto, TimelineRequest, View,
 };
 use loupe_jobs::{ResourceMode, WorkerConfig};
-use loupe_lan::{MemoryDiscovery, PairingPayload};
+use loupe_lan::MemoryDiscovery;
 use tempfile::TempDir;
 
 /// 2025-10-24 12:00 UTC.
@@ -346,13 +346,15 @@ async fn pairing_qr_devices_cloud_settings_and_recovery_key() {
     assert!(qr.svg.starts_with("<svg") && qr.svg.contains("<path d=\"M"));
     assert!(!qr.svg.contains("<circle") && !qr.svg.contains("radius"), "QR yalnızca kare modül");
     assert_eq!(qr.ttl_secs, 60);
-    let parsed = PairingPayload::parse(&qr.uri).unwrap();
-    assert_eq!(parsed.port, qr.port);
+    // Kamera açabilsin: https adresi, belirteç parça kısmında.
+    let token = |uri: &str| uri.split_once("/m#t=").unwrap().1.to_owned();
+    assert!(qr.uri.starts_with("https://") && qr.uri.contains(&format!(":{}/m#t=", qr.port)), "{}", qr.uri);
+    assert_eq!(qr.fingerprint.split(':').count(), 32);
     let now = loupe_core::now_ms();
     assert!(qr.expires_at_ms > now && qr.expires_at_ms <= now + 61_000);
     // Yenisi öncekini geçersiz kılar (her açılışta yeni belirteç).
     let qr2 = fx.core.pairing_qr().await.unwrap();
-    assert_ne!(PairingPayload::parse(&qr2.uri).unwrap().token, parsed.token);
+    assert_ne!(token(&qr2.uri), token(&qr.uri));
     fx.core.cancel_pairing().await;
 
     // Cihazlar: eşleşmiş bir telefon (doğrudan katalogda), politika ve iptal.
@@ -371,6 +373,7 @@ async fn pairing_qr_devices_cloud_settings_and_recovery_key() {
     assert_eq!(devices[0].conflict_policy, loupe_lan::ConflictPolicy::KeepBoth);
     let json = serde_json::to_value(&devices[0]).unwrap();
     assert_eq!(json["conflictPolicy"], "keep_both");
+    assert_eq!(json["kind"], "app");
     let devices = fx.core.revoke_device(7).await.unwrap();
     assert!(devices[0].revoked);
     assert_eq!(fx.core.status().await.unwrap().lan.paired_devices, 0);

@@ -107,7 +107,8 @@ pub struct LanStatusDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PairingQrDto {
-    /// `loupe://pair?…` (tek kullanımlık belirteç içerir; günlüğe yazılmaz).
+    /// `https://<adres>:<port>/m#t=…`: telefon kamerası tarayıcıda açar
+    /// (tek kullanımlık belirteç içerir; günlüğe yazılmaz).
     pub uri: String,
     /// Yalnızca `<rect>` ve `<path>`: keskin, yüksek kontrastlı modüller.
     pub svg: String,
@@ -116,6 +117,9 @@ pub struct PairingQrDto {
     pub addrs: Vec<String>,
     pub port: u16,
     pub name: String,
+    /// Sunucu sertifikasının SHA-256 parmak izi (`AB:CD:…`): tarayıcının
+    /// sertifika uyarısında görünen değerle karşılaştırmak için.
+    pub fingerprint: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -129,6 +133,8 @@ pub struct DeviceDto {
     pub last_seen_at: Option<i64>,
     pub last_address: Option<String>,
     pub revoked: bool,
+    /// `app` (mTLS) | `web` (tarayıcı oturumu).
+    pub kind: String,
     /// Bu cihazdan doğrulanarak gelen dosyalar.
     pub received: u64,
 }
@@ -249,7 +255,9 @@ impl Network {
             return Err(AppError::Invalid("Wi-Fi ya da Ethernet adresi bulunamadı".into()));
         }
         let payload = server.pairing_payload(addrs.clone())?;
-        let uri = payload.to_uri();
+        let uri =
+            payload.web_url().ok_or_else(|| AppError::Invalid("Wi-Fi ya da Ethernet adresi bulunamadı".into()))?;
+        let fingerprint = payload.server_cert_sha256.iter().map(|b| format!("{b:02X}")).collect::<Vec<_>>().join(":");
         Ok(PairingQrDto {
             svg: qr_svg(&uri)?,
             uri,
@@ -258,6 +266,7 @@ impl Network {
             addrs: addrs.iter().map(ToString::to_string).collect(),
             port: payload.port,
             name: payload.name,
+            fingerprint,
         })
     }
 
@@ -273,7 +282,7 @@ impl Network {
             Ok(c.prepare_cached(
                 "SELECT d.id, d.name, d.platform, d.conflict_policy, d.paired_at, d.last_seen_at, d.last_address,
                         d.revoked_at IS NOT NULL,
-                        (SELECT count(*) FROM device_assets a WHERE a.device_id = d.id)
+                        (SELECT count(*) FROM device_assets a WHERE a.device_id = d.id), d.kind
                    FROM devices d ORDER BY d.revoked_at IS NOT NULL, d.last_seen_at DESC, d.id DESC",
             )?
             .query_map([], |r| {
@@ -288,6 +297,7 @@ impl Network {
                     last_address: r.get(6)?,
                     revoked: r.get(7)?,
                     received: u64::try_from(r.get::<_, i64>(8)?).unwrap_or(0),
+                    kind: r.get(9)?,
                 })
             })?
             .collect::<Result<_, _>>()?)

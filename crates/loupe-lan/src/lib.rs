@@ -13,6 +13,7 @@
 //!   atomik içe aktarma.
 //! - [`telemetry`]: bayt/sn, ETA ve doğrulanan dosya sayısı yayını.
 //! - [`server`]: HTTP/2 + TLS 1.3 sunucusu ve uç noktaları.
+//! - [`web`]: kurulum gerektirmeyen telefon sayfası ve tarayıcı oturumu (RFC-001G).
 
 pub mod clock;
 pub mod conflict;
@@ -25,6 +26,7 @@ pub mod store;
 pub mod telemetry;
 pub mod tls;
 pub mod tus;
+pub mod web;
 
 pub use clock::{Clock, ManualClock, SystemClock};
 pub use conflict::{Classification, ConflictPolicy, Decision, Resolution, UploadKind};

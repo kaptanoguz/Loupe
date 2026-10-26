@@ -7,6 +7,7 @@ import type { Backend } from "./backend";
 import type {
   AddedLibrary,
   AiStatusDto,
+  ModelsDto,
   Chip,
   ChipKind,
   CloudSettingsDto,
@@ -209,6 +210,7 @@ export class MockBackend implements Backend {
         lastSeenAt: NEWEST * 1000,
         lastAddress: "192.168.1.42",
         revoked: false,
+        kind: "web",
         received: 1284,
       },
     ];
@@ -860,6 +862,70 @@ export class MockBackend implements Backend {
     return this.aiDto();
   }
 
+  // ───────────────────────────── modeller ─────────────────────────────
+
+  /** Sahte indirme: her yoklamada bir kaynak ilerler. */
+  private modelStep = -1;
+  private modelCancelled = false;
+
+  private static readonly MODEL_FILES: [string, string, number, string | null][] = [
+    ["scrfd_10g.onnx", "face_detect", 16_923_827, "InsightFace: yalnızca ticari olmayan araştırma kullanımı"],
+    ["arcface_w600k_r50.onnx", "face_embed", 174_383_860, "InsightFace: yalnızca ticari olmayan araştırma kullanımı"],
+    ["mclip_image.onnx", "clip_image", 351_000_000, "MIT (M-CLIP), OpenAI CLIP ViT-B/32"],
+    ["mclip_text.onnx", "clip_text", 1_120_000_000, "MIT (M-CLIP), XLM-RoBERTa"],
+    ["mclip_tokenizer.json", "tokenizer", 17_082_660, "MIT"],
+    ["libonnxruntime.so", "runtime", 21_042_416, "MIT"],
+  ];
+
+  private modelsDto(): ModelsDto {
+    const files = MockBackend.MODEL_FILES.map(([file, role, size, license], i) => ({
+      file,
+      role,
+      state: (this.modelStep > i ? "verified" : "missing") as "verified" | "missing",
+      size,
+      sha256: hexHash(rng(i + 11)).slice(0, 64),
+      license,
+    }));
+    const total = MockBackend.MODEL_FILES.length;
+    const running = this.modelStep >= 0 && this.modelStep <= total && !this.modelCancelled;
+    const cur = MockBackend.MODEL_FILES[Math.min(Math.max(this.modelStep, 0), total - 1)];
+    const ready = files.slice(0, 5).every((f) => f.state === "verified");
+    return {
+      dir: "/home/oguz/.local/share/loupe/models",
+      files,
+      ready,
+      runtime: files[5]?.state === "verified",
+      onnxBuild: true,
+      restartNeeded: ready,
+      job: {
+        running,
+        source: running && cur ? cur[0] : null,
+        phase: running ? "download" : null,
+        done: running && cur ? Math.floor(cur[2] / 2) : 0,
+        total: running && cur ? cur[2] : 0,
+        installed: this.modelStep > total ? files.map((f) => f.file) : [],
+        failed: [],
+        error: this.modelCancelled ? "iptal edildi" : null,
+      },
+    };
+  }
+
+  async modelsStatus(): Promise<ModelsDto> {
+    if (this.modelStep >= 0 && this.modelStep <= MockBackend.MODEL_FILES.length && !this.modelCancelled) this.modelStep++;
+    return this.modelsDto();
+  }
+
+  async modelsInstall(): Promise<ModelsDto> {
+    if (this.modelStep < 0 || this.modelCancelled) this.modelStep = Math.max(this.modelStep, 0);
+    this.modelCancelled = false;
+    return this.modelsDto();
+  }
+
+  async modelsCancel(): Promise<ModelsDto> {
+    this.modelCancelled = true;
+    return this.modelsDto();
+  }
+
   // ───────────────────────────── Wi-Fi ─────────────────────────────
 
   async pairingQr(): Promise<PairingQrDto> {
@@ -870,13 +936,14 @@ export class MockBackend implements Backend {
     for (let y = 0; y < 25; y++) for (let x = 0; x < 25; x++) if (r() < 0.5) d += `M${x + 4},${y + 4}h1v1h-1z`;
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 33 33" shape-rendering="crispEdges" role="img" aria-label="Eşleşme QR kodu"><rect width="33" height="33" fill="white"/><path d="${d}" fill="black"/></svg>`;
     return {
-      uri: `loupe://pair?t=${token}`,
+      uri: `https://192.168.1.20:48231/m#t=${token}`,
       svg,
       expiresAtMs: Date.now() + 60_000,
       ttlSecs: 60,
       addrs: ["192.168.1.20"],
       port: 48231,
       name: "Loupe masaüstü",
+      fingerprint: hexHash(rng(7)).slice(0, 64).toUpperCase().match(/../g)!.join(":"),
     };
   }
 

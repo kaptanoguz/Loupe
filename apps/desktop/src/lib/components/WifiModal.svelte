@@ -151,7 +151,12 @@
           <div class="h-px bg-amber" style:width="{qr ? (100 * remaining) / Math.max(1, qr.ttlSecs) : 0}%"></div>
         </div>
         <p class="text-xs text-ink-2">
-          Telefondaki Loupe uygulamasıyla tarayın. Kod tek kullanımlıktır ve {qr?.ttlSecs ?? 60} saniyede yenilenir.
+          Telefon kamerasıyla tarayın; aktarım sayfası tarayıcıda açılır, uygulama kurmak gerekmez. Kod tek
+          kullanımlıktır ve {qr?.ttlSecs ?? 60} saniyede yenilenir.
+        </p>
+        <p class="text-2xs text-ink-3">
+          Sertifika bu bilgisayarda üretildiği için tarayıcı bir kez uyarı gösterir: Gelişmiş → Devam. Parmak izi
+          aşağıdakiyle aynı olmalı.
         </p>
         {#if qr}
           <dl class="data text-2xs text-ink-3">
@@ -159,6 +164,10 @@
             {#each qr.addrs as a (a)}<dd>{a}:{qr.port}</dd>{/each}
             <dt class="label pt-1">Ad</dt>
             <dd>{qr.name}</dd>
+            <dt class="label pt-1" title="Tarayıcı sertifika uyarısı gösterirse bu değerle karşılaştırın">
+              Sertifika SHA-256
+            </dt>
+            <dd class="break-all" aria-label="Sertifika parmak izi">{qr.fingerprint}</dd>
           </dl>
         {/if}
       </div>
@@ -197,7 +206,7 @@
               <div class="flex items-center gap-2">
                 <Smartphone size={14} strokeWidth={1.5} class="shrink-0 text-ink-3" />
                 <span class="min-w-0 flex-1 truncate text-sm {d.revoked ? '' : 'text-ink'}">{d.name}</span>
-                <span class="data text-2xs text-ink-3">{d.platform}</span>
+                <span class="data text-2xs text-ink-3">{d.kind === "web" ? `${d.platform} · tarayıcı` : d.platform}</span>
               </div>
               <div class="data flex justify-between text-2xs text-ink-3">
                 <span>{d.revoked ? "erişim kaldırıldı" : `son ${dateTimeMs(d.lastSeenAt)}`}{d.lastAddress ? ` · ${d.lastAddress}` : ""}</span>
