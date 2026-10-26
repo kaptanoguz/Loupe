@@ -172,6 +172,11 @@ impl AppCore {
         if core.cfg.workers.is_some() && loupe_media::video::available() {
             let _requeued = core.queue.retry_dead_for_file_type(&[JobKind::Thumb, JobKind::MetadataFull], "video");
         }
+        // HEIC çözücüsü (libheif) sistem paketidir; güncellenince yeni iPhone
+        // fotoğrafları açılabilir. Başarısız küçük resimler her açılışta bir kez yeniden denenir.
+        if core.cfg.workers.is_some() {
+            let _requeued = core.queue.retry_dead_for_file_type(&[JobKind::Thumb], "heic");
+        }
         // İçe aktarma sürerken yalnızca ızgara küçük resmi üretilir; yüz, CLIP
         // ve metadata aktarma bitince başlar.
         let weak = Arc::downgrade(&core);
