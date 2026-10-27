@@ -4,6 +4,12 @@ A local-first photo catalog with offline face recognition and semantic search, W
 
 The interface is available in English and Turkish (Settings → language switch at the top right).
 
+*Yerel ve çevrimdışı fotoğraf arşivi: yüz tanıma, anlamla arama, telefondan Wi-Fi ile aktarım ve şifreli bulut yedeği. Google Photos / Lightroom kataloğuna gizlilik odaklı bir alternatif.*
+
+![Loupe timeline: justified photo grid grouped by day, with the EXIF inspector on the right](docs/screenshots/timeline.jpg)
+
+<sub>Screenshots are from the browser demo mode (`npm run dev` in `apps/desktop`) with sample images, so the names, places and EXIF values are made-up demo data.</sub>
+
 ## Features
 
 - **Catalog in place or import.** Add existing folders as references, or import from a folder, a memory card or an iPhone over USB with copy, move or hard link. Files land in date-based folders you choose (`{yyyy}/{mm}/{dd}`, with an optional subfolder). Duplicates are recognized by content and skipped.
@@ -15,6 +21,8 @@ The interface is available in English and Turkish (Settings → language switch 
 - **Phone transfer without an app.** Scan a QR code and send photos from the phone's browser over your local network (TLS, resumable uploads, BLAKE3 verification). An iOS Shortcut can send whole albums.
 - **Encrypted backup.** End-to-end encryption with [age](https://age-encryption.org) to S3, Backblaze B2, Cloudflare R2, Wasabi, WebDAV or a local/NAS folder, with bandwidth limits and a recovery key.
 - **Bit-rot check.** "Verify Library" re-hashes every file and reports missing or corrupted ones.
+
+![Ctrl+K search palette combining a person filter and a year, with result previews](docs/screenshots/search.jpg)
 
 ## Install
 
