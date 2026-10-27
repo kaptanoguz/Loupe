@@ -53,6 +53,27 @@ pub trait ImportCatalog {
     fn note_duplicate(&mut self, _existing: MediaId) -> Result<(), Self::Error> {
         Ok(())
     }
+
+    /// Aynı içerik katalogda var: bu kütüphaneye kopyalanmış (yönetilen) bir
+    /// dosyaysa kütüphane içindeki yolu. Importer dosya diskte yoksa onu bu
+    /// yola geri yazar. Varsayılan: geri yükleme yok, kopya atlanır.
+    fn managed_rel_path(&mut self, _existing: MediaId, _library: LibraryId) -> Result<Option<RelPath>, Self::Error> {
+        Ok(None)
+    }
+
+    /// Kaybolan dosya aynı yola geri yazılıp fsync edildikten sonra çağrılır.
+    fn commit_restored(&mut self, _existing: MediaId, _stat: &RestoredStat) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+/// Geri yüklenen dosyanın yeni dosya sistemi kimliği.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RestoredStat {
+    pub size_bytes: u64,
+    pub mtime_ns: i64,
+    pub inode: u64,
+    pub device_id: u64,
 }
 
 /// Bit-rot taramasında tek dosyanın katalogdaki beklenen hali.

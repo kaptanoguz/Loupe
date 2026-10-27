@@ -205,7 +205,9 @@ impl Imports {
                     None => imp.import_file(catalog, path, mode, Some(session))?,
                 };
                 Ok(match out {
-                    ImportOutcome::Imported { media_id, .. } => Some(media_id),
+                    ImportOutcome::Imported { media_id, .. } | ImportOutcome::Restored { media_id, .. } => {
+                        Some(media_id)
+                    }
                     ImportOutcome::Duplicate { .. } => None,
                 })
             })
@@ -348,6 +350,8 @@ impl Imports {
 
     fn flush(&self, fresh: &mut Vec<MediaId>) -> AppResult<()> {
         if !fresh.is_empty() {
+            // Geri yüklenen dosyanın, dosya yokken dead olmuş işleri.
+            self.queue.retry_dead_for_media(fresh)?;
             self.queue.enqueue_batch(&post_import_jobs(fresh))?;
             if let Some(hook) = &self.on_new {
                 hook(fresh);

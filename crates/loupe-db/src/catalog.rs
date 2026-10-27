@@ -1,8 +1,8 @@
 //! `loupe-core` katalog trait'lerinin SQLite uygulaması.
 
 use loupe_core::{
-    Blake3Hash, CommitOutcome, ImportCatalog, ImportSessionId, LibraryId, MediaId, NewMediaFile, RelPath,
-    VerifyCatalog, VerifyEntry, VerifyOutcome, VerifyRunId, VerifyTrigger,
+    Blake3Hash, CommitOutcome, ImportCatalog, ImportSessionId, LibraryId, MediaId, NewMediaFile, Placement, RelPath,
+    RestoredStat, VerifyCatalog, VerifyEntry, VerifyOutcome, VerifyRunId, VerifyTrigger,
 };
 use rusqlite::TransactionBehavior;
 
@@ -62,6 +62,26 @@ impl ImportCatalog for DbImportCatalog<'_> {
                 .write(|c| import::add_progress(c, s, import::Progress { skipped_dup: 1, ..Default::default() })),
             None => Ok(()),
         }
+    }
+
+    fn managed_rel_path(&mut self, existing: MediaId, library: LibraryId) -> Result<Option<RelPath>, DbError> {
+        let m = self.pool.read(|c| media::get(c, existing))?;
+        Ok(m.filter(|m| m.library_id == library && m.placement != Placement::Reference && m.soft_deleted_at.is_none())
+            .map(|m| m.rel_path))
+    }
+
+    fn commit_restored(&mut self, existing: MediaId, stat: &RestoredStat) -> Result<(), DbError> {
+        let session = self.session;
+        self.pool.write(|conn| {
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            media::mark_restored(&tx, existing, stat)?;
+            if let Some(s) = session {
+                let p = import::Progress { done_files: 1, done_bytes: stat.size_bytes, ..Default::default() };
+                import::add_progress(&tx, s, p)?;
+            }
+            tx.commit()?;
+            Ok(())
+        })
     }
 }
 
