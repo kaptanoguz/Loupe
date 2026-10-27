@@ -471,7 +471,8 @@ impl UploadService {
             let outcome = importer.import_file_as(&mut catalog, &path, ImportMode::Move, None, Placement::Lan);
             match outcome {
                 Ok(ImportOutcome::Imported { media_id, .. }) => Ok(media_id),
-                Ok(ImportOutcome::Duplicate { existing, .. }) => {
+                // LanCatalog geri yükleme yapmaz; gelirse kopya gibi işlenir.
+                Ok(ImportOutcome::Duplicate { existing, .. } | ImportOutcome::Restored { media_id: existing, .. }) => {
                     write_tx(&pool, |c| store::complete_transfer(c, &t, existing, false, clock.now_ms()))?;
                     Ok(existing)
                 }
@@ -653,7 +654,9 @@ impl UploadService {
             let mut catalog = PlainCatalog { pool: &pool };
             Ok(match importer.import_file_as(&mut catalog, &path, ImportMode::Move, None, Placement::Lan)? {
                 ImportOutcome::Imported { media_id, .. } => WholeOutcome { media_id, duplicate: false },
-                ImportOutcome::Duplicate { existing, .. } => WholeOutcome { media_id: existing, duplicate: true },
+                ImportOutcome::Duplicate { existing, .. } | ImportOutcome::Restored { media_id: existing, .. } => {
+                    WholeOutcome { media_id: existing, duplicate: true }
+                }
             })
         })
         .await

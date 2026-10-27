@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 
 use loupe_core::{
     Blake3Hash, CommitOutcome, ImportCatalog, ImportMode, ImportSessionId, LibraryId, MediaId, NewMediaFile, Placement,
-    RelPath, classify, now_ms,
+    RelPath, RestoredStat, classify, now_ms,
 };
 use uuid::Uuid;
 
@@ -74,6 +74,10 @@ pub enum ImportOutcome {
     },
     /// Aynı içerik zaten katalogda: hiçbir dosyaya dokunulmadı.
     Duplicate { existing: MediaId, blake3: Blake3Hash },
+    /// İçerik katalogdaydı ama kütüphaneye kopyalanan dosyası diskten
+    /// kaybolmuştu: kaynaktan aynı yola geri yazıldı. Kaynağa dokunulmaz
+    /// (Taşı modunda da).
+    Restored { media_id: MediaId, rel_path: RelPath, blake3: Blake3Hash },
 }
 
 /// Importer'ın kendi yazdığı yollar. İzleyici bunları "dış değişiklik" sayıp
@@ -260,6 +264,11 @@ impl Importer {
 
         // 2. Tam kopya engeli: dosya sistemine dokunmadan önce.
         if let Some(existing) = catalog.find_by_blake3(&digest.blake3).map_err(StorageError::catalog)? {
+            if let Some(rel) = catalog.managed_rel_path(existing, self.cfg.library_id).map_err(StorageError::catalog)?
+                && !rel.to_path(&self.root).exists()
+            {
+                return self.restore(catalog, &src, &digest, existing, rel);
+            }
             catalog.note_duplicate(existing).map_err(StorageError::catalog)?;
             return Ok(ImportOutcome::Duplicate { existing, blake3: digest.blake3 });
         }
@@ -339,6 +348,45 @@ impl Importer {
             ImportMode::Copy | ImportMode::Hardlink => false,
         };
         Ok(ImportOutcome::Imported { media_id, rel_path, placement, blake3: digest.blake3, source_removed })
+    }
+
+    /// Kaybolan yönetilen dosyayı kaynaktan katalogdaki yoluna geri yazar:
+    /// aynı doğrulamalı kopya, ama ad seçilmez; yol doluysa (yarışta başka
+    /// bir dosya geldi) dokunulmaz.
+    fn restore<C: ImportCatalog>(
+        &self,
+        catalog: &mut C,
+        src: &Path,
+        digest: &FileDigest,
+        existing: MediaId,
+        rel: RelPath,
+    ) -> Result<ImportOutcome, StorageError> {
+        let mut guard = TempGuard(None);
+        let staged = self.stage_copy(src, digest, &mut guard)?;
+        let target = rel.to_path(&self.root);
+        let dir = target.parent().map(Path::to_path_buf).unwrap_or_else(|| self.root.clone());
+        create_dir_all_durable(&dir)?;
+        if let Some(e) = &self.expected {
+            e.expect(&target);
+        }
+        rename_noreplace(&staged, &target)?;
+        guard.disarm();
+        fsync_dir(&dir)?;
+        if let Some(parent) = staged.parent() {
+            fsync_dir(parent)?;
+        }
+        let placed = fs::metadata(&target).map_err(StorageError::io("stat", &target))?;
+        let stat = RestoredStat {
+            size_bytes: digest.size,
+            mtime_ns: meta::mtime_ns(&placed),
+            inode: meta::inode(&placed),
+            device_id: meta::device(&placed),
+        };
+        if let Err(e) = catalog.commit_restored(existing, &stat) {
+            Self::undo_placement(&target, None);
+            return Err(StorageError::catalog(e));
+        }
+        Ok(ImportOutcome::Restored { media_id: existing, rel_path: rel, blake3: digest.blake3 })
     }
 
     fn tmp_path(&self, ext: &str) -> PathBuf {

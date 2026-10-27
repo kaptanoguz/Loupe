@@ -268,6 +268,13 @@ fn waiting_job_keeps_its_attempts_and_dead_code_revives() {
     assert_eq!(q.retry_dead_with_code(&[JobKind::FaceDetect, JobKind::ClipEmbed], "NO_THUMB").unwrap(), 1);
     let r = q.get(id2).unwrap().unwrap();
     assert_eq!((r.state, r.attempts), (JobState::Pending, 0));
+
+    // Medyaya göre diriltme: yalnızca verilen medyanın dead işleri.
+    q.claim("w", 9, lease).unwrap().unwrap();
+    assert_eq!(q.fail(id2, "w", &JobError::permanent("IO", "dosya yok")).unwrap(), JobState::Dead);
+    assert_eq!(q.retry_dead_for_media(&[m[0]]).unwrap(), 0);
+    assert_eq!(q.retry_dead_for_media(&[m[0], m[1]]).unwrap(), 1);
+    assert_eq!(q.get(id2).unwrap().unwrap().state, JobState::Pending);
 }
 
 #[test]

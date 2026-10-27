@@ -364,6 +364,26 @@ impl JobQueue {
         Ok(n)
     }
 
+    /// Verilen medyanın dead-letter işlerini sıfır denemeyle yeniden kuyruğa
+    /// koyar (ör. kaybolan dosya geri yüklenince küçük resim ve metadata).
+    pub fn retry_dead_for_media(&self, ids: &[MediaId]) -> Result<usize, JobsError> {
+        let mut n = 0;
+        for chunk in ids.chunks(ENQUEUE_BATCH) {
+            let marks = (2..2 + chunk.len()).map(|i| format!("?{i}")).collect::<Vec<_>>().join(", ");
+            let sql = format!(
+                "UPDATE jobs SET state = 'pending', attempts = 0, run_after = ?1, updated_at = ?1
+                  WHERE state = 'dead' AND media_id IN ({marks})"
+            );
+            let mut values: Vec<rusqlite::types::Value> = vec![now_ms().into()];
+            values.extend(chunk.iter().map(|m| rusqlite::types::Value::from(m.0)));
+            n += self.pool.write(|conn| Ok(conn.execute(&sql, params_from_iter(values.iter()))?))?;
+        }
+        if n > 0 {
+            self.signal.notify();
+        }
+        Ok(n)
+    }
+
     /// Belirli hata koduyla dead-letter'a düşmüş işleri sıfır denemeyle yeniden
     /// kuyruğa koyar (ör. eski sürümlerde küçük resmi beklerken tükenen AI işleri).
     pub fn retry_dead_with_code(&self, kinds: &[JobKind], code: &str) -> Result<usize, JobsError> {

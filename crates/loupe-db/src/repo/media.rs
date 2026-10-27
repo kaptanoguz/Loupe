@@ -205,6 +205,19 @@ pub fn delete(conn: &Connection, id: MediaId) -> Result<bool, DbError> {
 }
 
 /// Doğrulama sonucu. `ok` ve `mismatch` tam okuma demektir → `last_verified_at` güncellenir.
+/// Kaybolan dosya geri yazıldı: yeni dosya kimliği, doğrulama durumu `ok`.
+pub fn mark_restored(conn: &Connection, id: MediaId, stat: &loupe_core::RestoredStat) -> Result<(), DbError> {
+    let now = now_ms();
+    conn.prepare_cached(
+        "UPDATE media_files
+            SET mtime_ns = ?2, inode = ?3, device_id = ?4,
+                verify_state = 'ok', missing_since = NULL, last_verified_at = ?5, updated_at = ?5
+          WHERE id = ?1",
+    )?
+    .execute(params![id.0, stat.mtime_ns, bits_to_i64(stat.inode), bits_to_i64(stat.device_id), now])?;
+    Ok(())
+}
+
 pub fn set_verify_state(conn: &Connection, id: MediaId, state: VerifyState) -> Result<(), DbError> {
     let now = now_ms();
     conn.prepare_cached(

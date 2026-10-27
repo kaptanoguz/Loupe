@@ -13,7 +13,9 @@ pub mod ids;
 pub mod path;
 pub mod time;
 
-pub use catalog::{CommitOutcome, ImportCatalog, NewMediaFile, VerifyCatalog, VerifyEntry, VerifyOutcome};
+pub use catalog::{
+    CommitOutcome, ImportCatalog, NewMediaFile, RestoredStat, VerifyCatalog, VerifyEntry, VerifyOutcome,
+};
 pub use enums::{
     ColorLabel, Flag, ImportItemState, ImportMode, LibraryKind, LibraryState, MediaFileType, Placement, SessionMode,
     SessionState, TakenAtSource, VerifyState, VerifyTrigger,

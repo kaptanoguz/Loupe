@@ -157,7 +157,7 @@ fn imported(o: ImportOutcome) -> (loupe_core::MediaId, String, bool) {
         ImportOutcome::Imported { media_id, rel_path, source_removed, .. } => {
             (media_id, rel_path.to_string(), source_removed)
         }
-        ImportOutcome::Duplicate { existing, .. } => panic!("kopya beklenmiyordu: {existing}"),
+        other => panic!("yeni içe aktarma beklenirdi: {other:?}"),
     }
 }
 
@@ -268,6 +268,42 @@ fn duplicate_blake3_is_blocked_in_every_mode() {
     assert_eq!(fx.pool.read(|c| media::count(c, fx.lib)).unwrap(), 1);
     let s = fx.pool.read(|c| import_repo::get_session(c, fx.session)).unwrap().unwrap();
     assert_eq!((s.done_files, s.skipped_dup), (1, 3));
+}
+
+#[test]
+fn reimport_restores_a_lost_library_copy_at_its_original_path() {
+    let fx = Fixture::new();
+    let src = fx.jpeg(&fx.card, "IMG_0007.JPG", 7);
+    let imp = fx.importer();
+    let (id, rel, _) = imported(imp.import_file(&mut fx.catalog(), &src, ImportMode::Copy, None).unwrap());
+    let target = fx.root.join(&rel);
+    let original = fs::read(&target).unwrap();
+
+    // Kütüphanedeki kopya diskten kayboldu (ör. başka bir işletim sistemi
+    // NTFS'teki değişiklikleri geri aldı); katalog satırı duruyor.
+    fs::remove_file(&target).unwrap();
+    fs::remove_dir(target.parent().unwrap()).unwrap();
+    fx.pool.write(|c| media::set_verify_state(c, id, VerifyState::Missing)).unwrap();
+
+    for mode in [ImportMode::Move, ImportMode::Copy] {
+        match imp.import_file(&mut fx.catalog(), &src, mode, None).unwrap() {
+            ImportOutcome::Restored { media_id, rel_path, .. } if mode == ImportMode::Move => {
+                assert_eq!((media_id, rel_path.to_string()), (id, rel.clone()));
+            }
+            // Dosya artık yerinde: ikinci içe aktarma yine kopya sayılır.
+            ImportOutcome::Duplicate { existing, .. } if mode == ImportMode::Copy => assert_eq!(existing, id),
+            other => panic!("{mode}: beklenmeyen sonuç {other:?}"),
+        }
+        assert!(src.exists(), "{mode}: geri yüklemede kaynağa dokunulmaz");
+    }
+    assert_eq!(fs::read(&target).unwrap(), original);
+    assert_eq!(fx.library_files(), vec![target]);
+    assert!(fx.staging_is_empty());
+    let m = fx.pool.read(|c| media::get(c, id)).unwrap().unwrap();
+    assert_eq!(m.verify_state, VerifyState::Ok);
+    assert_eq!(fx.pool.read(|c| media::count(c, fx.lib)).unwrap(), 1);
+    let s = fx.pool.read(|c| import_repo::get_session(c, fx.session)).unwrap().unwrap();
+    assert_eq!((s.done_files, s.skipped_dup), (2, 1));
 }
 
 #[test]
