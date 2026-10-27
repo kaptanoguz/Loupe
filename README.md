@@ -4,8 +4,6 @@ A local-first photo catalog with offline face recognition and semantic search, W
 
 The interface is available in English and Turkish (Settings → language switch at the top right).
 
-*Yerel ve çevrimdışı fotoğraf arşivi: yüz tanıma, anlamla arama, telefondan Wi-Fi ile aktarım ve şifreli bulut yedeği. Google Photos / Lightroom kataloğuna gizlilik odaklı bir alternatif.*
-
 ![Loupe timeline: justified photo grid grouped by day, with the EXIF inspector on the right](docs/screenshots/timeline.jpg)
 
 <sub>Screenshots are from the browser demo mode (`npm run dev` in `apps/desktop`) with sample images, so the names, places and EXIF values are made-up demo data.</sub>
