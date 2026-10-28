@@ -263,8 +263,6 @@ export const tauriBackend: Backend = {
   verifyLibrary: (library) => call("verify_library", { library }),
   cancelVerify: (library) => call("cancel_verify", { library }),
   verifyRuns: (limit) => call("verify_runs", { limit }),
-  // WebKitGTK özel şemayı olduğu gibi yükler (Windows biçimi thumb.localhost
-  // çekirdekte de çözülür, Linux hedefimiz).
   editState: (id) => call("get_edit", { id }),
   saveEdit: (id, recipe) => call("save_edit", { id, recipe }),
   revertEdit: (id) => call("revert_edit", { id }),
@@ -272,8 +270,19 @@ export const tauriBackend: Backend = {
   exportEdit: (id) => call("export_edit", { id }),
   externalEditors: () => call("external_editors"),
   openInEditor: (id, editor) => call("open_in_editor", { id, editor }),
-  thumbUrl: (size, hash, edit) => `thumb://${size}/${hash}${edit ? `?e=${edit}` : ""}`,
+  thumbUrl: (size, hash, edit) => `${THUMB_BASE}${size}/${hash}${edit ? `?e=${edit}` : ""}`,
 };
+
+/**
+ * WebKitGTK ve WKWebView özel şemayı olduğu gibi yükler (`thumb://`).
+ * WebView2 (Windows) ve Android yalnızca `http://<şema>.localhost/` biçimini
+ * çözer; `thumb://` orada sessizce yüklenmez. Çekirdek iki biçimi de kabul eder.
+ */
+export function thumbBase(userAgent: string): string {
+  return /Windows|Android/.test(userAgent) ? "http://thumb.localhost/" : "thumb://";
+}
+
+const THUMB_BASE = thumbBase(typeof navigator === "undefined" ? "" : navigator.userAgent);
 
 export function createBackend(): Backend {
   return isTauri() ? tauriBackend : new MockBackend();
