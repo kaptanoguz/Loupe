@@ -87,6 +87,10 @@ pub struct ModelFile {
     /// dosyalarda. Dosya bir alt dizinde olmalı (`mclip_text/model.onnx`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub external_data: bool,
+    /// Yalnızca bu işletim sisteminde gerekli (`std::env::consts::OS`:
+    /// `linux` | `macos` | `windows`); yoksa her yerde.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub os: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -203,8 +207,19 @@ fn allowed_url(url: &str) -> bool {
 }
 
 impl Manifest {
+    /// Gömülü manifest, bu işletim sistemine göre süzülmüş.
     pub fn builtin() -> Result<Self, AiError> {
-        Self::parse(BUILTIN_MANIFEST)
+        Ok(Self::parse(BUILTIN_MANIFEST)?.for_os(std::env::consts::OS))
+    }
+
+    /// Başka işletim sistemine ait dosyaları ve yalnızca onlara hizmet eden
+    /// kaynakları atar (örn. Windows'ta `libonnxruntime.so`).
+    #[must_use]
+    pub fn for_os(mut self, os: &str) -> Self {
+        self.files.retain(|f| f.os.as_deref().is_none_or(|o| o == os));
+        let used: HashSet<String> = self.files.iter().map(|f| f.source.clone()).collect();
+        self.sources.retain(|s| used.contains(&s.id));
+        self
     }
 
     pub fn parse(json: &str) -> Result<Self, AiError> {
@@ -257,6 +272,9 @@ impl Manifest {
                     }
                 }
                 _ => return Err(invalid(format!("{}: member yalnızca arşiv kaynağında olur", f.file))),
+            }
+            if f.os.as_deref().is_some_and(|o| !matches!(o, "linux" | "macos" | "windows")) {
+                return Err(invalid(format!("{}: bilinmeyen işletim sistemi {:?}", f.file, f.os)));
             }
             if f.external_data && (src.hf.is_none() || src.archive.is_some() || !f.file.contains('/')) {
                 return Err(invalid(format!(
@@ -516,7 +534,21 @@ pub fn commit(dir: &Path, tmp: &Path, name: &str) -> Result<(), AiError> {
     let parent = dst.parent().unwrap_or(dir);
     std::fs::create_dir_all(parent).map_err(io("dizin oluşturulamadı", parent))?;
     std::fs::rename(tmp, &dst).map_err(io("yerine konamadı", &dst))?;
-    File::open(parent).and_then(|d| d.sync_all()).map_err(io("dizin fsync", parent))
+    fsync_dir(parent)
+}
+
+/// Rename'in diske yazılması için dizini fsync eder. Windows'ta dizin `File`
+/// olarak açılamaz (os error 5); NTFS üst veriyi kendi günlüğüyle korur.
+fn fsync_dir(dir: &Path) -> Result<(), AiError> {
+    #[cfg(unix)]
+    {
+        File::open(dir).and_then(|d| d.sync_all()).map_err(io("dizin fsync", dir))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+        Ok(())
+    }
 }
 
 /// `.partial/` içinde bu model dosyası için geçici ad.

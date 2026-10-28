@@ -18,6 +18,11 @@ use serde::Serialize;
 use crate::{AppError, AppResult};
 
 /// Model dizinine indirilen ONNX Runtime (uygulama `ORT_DYLIB_PATH` yoksa bunu yükler).
+#[cfg(target_os = "windows")]
+pub const RUNTIME_FILE: &str = "onnxruntime.dll";
+#[cfg(target_os = "macos")]
+pub const RUNTIME_FILE: &str = "libonnxruntime.dylib";
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 pub const RUNTIME_FILE: &str = "libonnxruntime.so";
 
 #[derive(Debug, Clone, Default, Serialize)]

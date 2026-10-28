@@ -285,7 +285,18 @@ fn builtin_manifest_is_valid_and_covers_the_app() {
     assert_eq!(m.file("mclip_image.onnx").unwrap().dim, Some(512));
     assert_eq!(m.file("mclip_text/model.onnx").unwrap().dim, Some(512));
     assert!(m.file("mclip_text/model.onnx").unwrap().external_data);
-    assert_eq!(m.file("libonnxruntime.so").unwrap().role, "runtime");
+    let runtimes: Vec<_> = m.files.iter().filter(|f| f.role == "runtime").collect();
+    assert_eq!(runtimes.len(), 1, "her işletim sisteminde tek ONNX Runtime");
+    assert_eq!(runtimes[0].os.as_deref(), Some(std::env::consts::OS));
+    let all = Manifest::parse(loupe_ai::models::BUILTIN_MANIFEST).unwrap();
+    for (os, file) in
+        [("linux", "libonnxruntime.so"), ("macos", "libonnxruntime.dylib"), ("windows", "onnxruntime.dll")]
+    {
+        let m = all.clone().for_os(os);
+        assert_eq!(m.files.iter().filter(|f| f.role == "runtime").map(|f| f.file.as_str()).collect::<Vec<_>>(), [file]);
+        assert!(m.files.iter().all(|f| m.source(&f.source).is_some()));
+        assert!(m.sources.iter().all(|s| m.files.iter().any(|f| f.source == s.id)), "{os}: kullanılmayan kaynak");
+    }
     for s in &m.sources {
         assert!(s.url.starts_with("https://"), "{}", s.url);
         // GitHub sürümleri bayt bayt sabit; Hugging Face kaynakları LFS özetiyle çözülür.

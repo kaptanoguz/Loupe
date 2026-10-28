@@ -18,6 +18,22 @@
       "license": "MIT"
     },
     {
+      "id": "onnxruntime-osx-universal2-1.22.0",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-osx-universal2-1.22.0.tgz",
+      "size": 54820264,
+      "sha256": "cfa6f6584d87555ed9f6e7e8a000d3947554d589efe3723b8bfa358cd263d03c",
+      "archive": "tgz",
+      "license": "MIT"
+    },
+    {
+      "id": "onnxruntime-win-x64-1.22.0",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-win-x64-1.22.0.zip",
+      "size": 72368545,
+      "sha256": "174c616efc0271194488642a72f1a514e01487da4dfe84c49296d66e40ebe0da",
+      "archive": "zip",
+      "license": "MIT"
+    },
+    {
       "id": "mclip-visual",
       "url": "https://huggingface.co/immich-app/XLM-Roberta-Large-Vit-B-32/resolve/main/visual/model.onnx",
       "hf": { "repo": "immich-app/XLM-Roberta-Large-Vit-B-32", "revision": "main", "path": "visual/model.onnx" },
@@ -63,7 +79,26 @@
       "source": "onnxruntime-linux-x64-1.22.0",
       "member": "onnxruntime-linux-x64-1.22.0/lib/libonnxruntime.so.1.22.0",
       "size": 21042416,
-      "sha256": "3da6146e14e7b8aaec625dde11d6114c7457c87a5f93d744897da8781e35c673"
+      "sha256": "3da6146e14e7b8aaec625dde11d6114c7457c87a5f93d744897da8781e35c673",
+      "os": "linux"
+    },
+    {
+      "file": "libonnxruntime.dylib",
+      "role": "runtime",
+      "source": "onnxruntime-osx-universal2-1.22.0",
+      "member": "onnxruntime-osx-universal2-1.22.0/lib/libonnxruntime.1.22.0.dylib",
+      "size": 70774760,
+      "sha256": "db045368293215c9d22aa7b8c983d688b3ae9ca1da3f64ffbe01ba7df31c3355",
+      "os": "macos"
+    },
+    {
+      "file": "onnxruntime.dll",
+      "role": "runtime",
+      "source": "onnxruntime-win-x64-1.22.0",
+      "member": "onnxruntime-win-x64-1.22.0/lib/onnxruntime.dll",
+      "size": 12418080,
+      "sha256": "579b636403983254346a5c1d80bd28f1519cd1e284cd204f8d4ff41f8d711559",
+      "os": "windows"
     }
   ]
 }
