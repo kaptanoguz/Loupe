@@ -136,6 +136,7 @@ Akış: **seç → ön kontrol → BLAKE3 → tus.**
 | `scrfd_10g.onnx` | yüz tespiti | InsightFace `buffalo_l.zip` (GitHub v0.7) → `det_10g.onnx` | zip + üye SHA-256 |
 | `arcface_w600k_r50.onnx` | yüz vektörü, 512 | aynı zip → `w600k_r50.onnx` | zip + üye SHA-256 |
 | `libonnxruntime.so` | ONNX Runtime 1.22.0 (`ort` rc.10 ile aynı API) | Microsoft GitHub `onnxruntime-linux-x64-1.22.0.tgz` | tgz + üye SHA-256 |
+| `libonnxruntime.dylib` (macOS) / `onnxruntime.dll` (Windows) | ONNX Runtime 1.22.0 | `onnxruntime-osx-universal2-1.22.0.tgz` / `onnxruntime-win-x64-1.22.0.zip` | arşiv + üye SHA-256; manifestte `os` alanıyla yalnız o sistemde |
 | `mclip_image.onnx` | CLIP görüntü, 512 | Hugging Face `immich-app/XLM-Roberta-Large-Vit-B-32` `visual/model.onnx` | LFS özeti |
 | `mclip_text/model.onnx` + harici ağırlıklar | CLIP metin (çok dilli), 512 | aynı depo `textual/` (grafik + 171 ağırlık dosyası, ≈2.2 GB) | LFS özeti / git blob SHA-1 |
 | `mclip_tokenizer.json` | XLM-R belirteçleyici | aynı depo `textual/tokenizer.json` | LFS özeti |

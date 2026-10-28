@@ -43,12 +43,26 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), MediaError> 
         f.sync_all().map_err(MediaError::io("fsync", &tmp))?;
         drop(f);
         fs::rename(&tmp, path).map_err(MediaError::io("rename", path))?;
-        File::open(dir).and_then(|d| d.sync_all()).map_err(MediaError::io("dizin fsync", dir))
+        fsync_dir(dir)
     })();
     if res.is_err() {
         let _ignored = fs::remove_file(&tmp);
     }
     res
+}
+
+/// Windows'ta dizin `File` olarak açılamaz (os error 5); NTFS üst veriyi kendi
+/// günlüğüyle korur, bu yüzden yalnız Unix'te fsync edilir.
+fn fsync_dir(dir: &Path) -> Result<(), MediaError> {
+    #[cfg(unix)]
+    {
+        File::open(dir).and_then(|d| d.sync_all()).map_err(MediaError::io("dizin fsync", dir))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
