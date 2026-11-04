@@ -2,18 +2,26 @@
 //! Masaüstü komutlarının uçtan uca testleri: WebView olmadan, gerçek SQLite,
 //! gerçek dosya sistemi ve gerçek importer ile.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
+use axum::Router;
+use axum::extract::{Path as UrlPath, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::routing::get;
 use image::{DynamicImage, ImageBuffer, Rgb};
+use loupe_app::geodata::GeoData;
 use loupe_app::{
     AppConfig, AppCore, Arrange, CullRequest, Grouping, ImportRequest, ImportSessionDto, LibraryPatch, SortDir,
     SortKey, TimelineRequest, View,
 };
 use loupe_core::{Blake3Hash, MediaId, TakenAtSource};
 use loupe_db::repo::{location, media};
+use loupe_jobs::GeoSlot;
 use loupe_lan::{Discovery, MemoryDiscovery};
 use loupe_media::ThumbSize;
 use loupe_media::thumb::ThumbFormat;
@@ -829,4 +837,148 @@ fn manual_albums_hold_chosen_photos_without_touching_files() {
     assert!(fx.core.delete_album(aile.id).is_err());
     assert_eq!(fx.all_ids().len(), ids.len());
     assert!(fx.core.sidebar().unwrap().albums.iter().all(|a| a.id != aile.id));
+}
+
+// ───────────────────────────── yer verisi ─────────────────────────────
+
+fn geo_fixture(name: &str) -> Vec<u8> {
+    std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../loupe-media/tests/fixtures/geonames").join(name))
+        .unwrap()
+}
+
+/// Sıkıştırmasız tek üyeli zip (merkez dizinli).
+fn stored_zip(name: &str, data: &[u8]) -> Vec<u8> {
+    fn le16(v: &mut Vec<u8>, x: u16) {
+        v.extend_from_slice(&x.to_le_bytes());
+    }
+    fn le32(v: &mut Vec<u8>, x: u32) {
+        v.extend_from_slice(&x.to_le_bytes());
+    }
+    let (n, len) = (u16::try_from(name.len()).unwrap(), u32::try_from(data.len()).unwrap());
+    let mut out = Vec::new();
+    le32(&mut out, 0x0403_4b50);
+    for x in [20u16, 0, 0, 0, 0] {
+        le16(&mut out, x);
+    }
+    for x in [0, len, len] {
+        le32(&mut out, x);
+    }
+    le16(&mut out, n);
+    le16(&mut out, 0);
+    out.extend_from_slice(name.as_bytes());
+    out.extend_from_slice(data);
+    let cd_off = u32::try_from(out.len()).unwrap();
+    let mut cd = Vec::new();
+    le32(&mut cd, 0x0201_4b50);
+    for x in [20u16, 20, 0, 0, 0, 0] {
+        le16(&mut cd, x);
+    }
+    for x in [0, len, len] {
+        le32(&mut cd, x);
+    }
+    for x in [n, 0, 0, 0, 0] {
+        le16(&mut cd, x);
+    }
+    le32(&mut cd, 0);
+    le32(&mut cd, 0);
+    cd.extend_from_slice(name.as_bytes());
+    let cd_len = u32::try_from(cd.len()).unwrap();
+    out.extend_from_slice(&cd);
+    le32(&mut out, 0x0605_4b50);
+    for x in [0u16, 0, 1, 1] {
+        le16(&mut out, x);
+    }
+    le32(&mut out, cd_len);
+    le32(&mut out, cd_off);
+    le16(&mut out, 0);
+    out
+}
+
+type GeoFiles = Arc<HashMap<String, Vec<u8>>>;
+
+async fn geo_serve(State(f): State<GeoFiles>, UrlPath(name): UrlPath<String>) -> Response {
+    match f.get(&name) {
+        Some(b) => b.clone().into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+async fn geo_server(files: GeoFiles) -> String {
+    let app = Router::new().route("/{name}", get(geo_serve)).with_state(files);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    format!("http://{addr}")
+}
+
+async fn wait_geo(geo: &GeoData) -> loupe_app::GeoDataDto {
+    let start = Instant::now();
+    loop {
+        let s = geo.status().unwrap();
+        if !s.job.running {
+            return s;
+        }
+        assert!(start.elapsed() < Duration::from_secs(20), "indirme bitmedi");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn place_data_downloads_verifies_and_assigns_gps_photos() {
+    let fx = Fx::new();
+    fx.shoot_card();
+    let lib = fx.add_library();
+    fx.import(lib);
+    let ids = fx.all_ids();
+    let (goreme, ocean, no_gps) = (MediaId(ids[0]), MediaId(ids[1]), MediaId(ids[2]));
+    let pool = fx.core.pool().clone();
+    for (id, lat, lon) in [(goreme, 38.642_83, 34.828_86), (ocean, 0.0, -30.0)] {
+        pool.write(|c| {
+            media::apply_metadata(c, id, &media::MetadataUpdate { gps: Some((lat, lon, None)), ..Default::default() })
+        })
+        .unwrap();
+    }
+
+    let files: GeoFiles = Arc::new(HashMap::from([
+        ("cities500.zip".to_owned(), stored_zip("cities500.txt", &geo_fixture("cities500.txt"))),
+        ("admin1CodesASCII.txt".to_owned(), geo_fixture("admin1CodesASCII.txt")),
+        ("admin2Codes.txt".to_owned(), Vec::new()),
+        ("countryInfo.txt".to_owned(), geo_fixture("countryInfo.txt")),
+    ]));
+    let base = geo_server(files).await;
+    let dir = fx.tmp.path().join("geo-test");
+    let slot: GeoSlot = Arc::default();
+
+    // Alt sınır gerçek dökümünkü: küçük set reddedilir, hiçbir dosya yerine konmaz.
+    let strict = GeoData::new(dir.clone(), pool.clone(), slot.clone()).with_source(&base, 100_000);
+    assert!(!strict.status().unwrap().ready);
+    strict.install().unwrap();
+    let s = wait_geo(&strict).await;
+    assert!(s.job.error.as_deref().unwrap().contains("en az 100000"), "{:?}", s.job.error);
+    assert!(!s.ready && !dir.join("cities500.txt").exists());
+
+    let geo = GeoData::new(dir.clone(), pool.clone(), slot.clone()).with_source(&base, 10);
+    geo.install().unwrap();
+    let s = wait_geo(&geo).await;
+    assert_eq!(s.job.error, None);
+    assert_eq!(s.job.phase, Some("done"));
+    assert!(s.ready && s.places > 10);
+    assert_eq!((s.with_gps, s.located, s.job.assigned), (2, 1, 1));
+    assert!(dir.join("cities500.txt").is_file() && !dir.join(".partial").exists());
+    assert!(slot.read().unwrap().is_some(), "çalışan hatta verildi");
+
+    let loc = |id: MediaId| -> Option<i64> {
+        pool.read(|c| Ok(c.query_row("SELECT location_id FROM media_files WHERE id = ?1", [id.0], |r| r.get(0))?))
+            .unwrap()
+    };
+    assert!(loc(goreme).is_some());
+    assert_eq!((loc(ocean), loc(no_gps)), (None, None));
+    let places = fx.slice(View::Places, Grouping::Day, 0, 10);
+    assert_eq!(places.sections.len(), 1);
+    assert_eq!(places.sections[0].title, "Göreme");
+
+    // Açılışta yeniden yüklenir; atama tekrarında yeni satır çıkmaz.
+    let reopened = GeoData::new(dir, pool.clone(), Arc::default());
+    let idx = reopened.load().unwrap().unwrap();
+    assert_eq!(loupe_app::geodata::assign_missing(&pool, &idx, |_| {}).unwrap(), 0);
 }

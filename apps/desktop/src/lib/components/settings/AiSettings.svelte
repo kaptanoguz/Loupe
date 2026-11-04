@@ -38,7 +38,7 @@
   import X from "@lucide/svelte/icons/x";
   import { onDestroy, onMount } from "svelte";
 
-  import type { AiStatusDto, ModelsDto, ResourceMode } from "../../api/types";
+  import type { AiStatusDto, GeoDataDto, ModelsDto, ResourceMode } from "../../api/types";
   import { bytes, count } from "../../format";
   import type { Catalog } from "../../state/catalog.svelte";
 
@@ -88,8 +88,49 @@
   const missing = $derived(models ? models.files.filter((f) => f.state !== "verified") : []);
   const missingBytes = $derived(missing.reduce((a, f) => a + (f.size ?? 0), 0));
 
-  onMount(() => void loadModels());
-  onDestroy(() => clearTimeout(pollTimer));
+  onMount(() => {
+    void loadModels();
+    void loadGeo();
+  });
+  onDestroy(() => {
+    clearTimeout(pollTimer);
+    clearTimeout(geoTimer);
+  });
+
+  let geo = $state.raw<GeoDataDto | null>(null);
+  let geoTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const GEO_PHASES: Record<string, string> = {
+    download: t("geo.download"),
+    verify: t("geo.verify"),
+    assign: t("geo.assign"),
+  };
+
+  async function loadGeo(): Promise<void> {
+    clearTimeout(geoTimer);
+    try {
+      const next = await catalog.backend.geodataStatus();
+      const finished = geo?.job.running && !next.job.running;
+      geo = next;
+      if (finished) {
+        if (next.job.error) catalog.flash(t("geo.failed", { error: next.job.error }));
+        else catalog.flash(t("geo.ready", { n: count(next.job.assigned) }));
+        void catalog.refreshSidebar();
+      }
+    } catch (e) {
+      catalog.fail(e);
+    }
+    if (geo?.job.running) geoTimer = setTimeout(() => void loadGeo(), MODEL_POLL_MS);
+  }
+
+  async function installGeo(): Promise<void> {
+    try {
+      geo = await catalog.backend.geodataInstall();
+    } catch (e) {
+      catalog.fail(e);
+    }
+    void loadGeo();
+  }
 
   async function loadModels(): Promise<void> {
     clearTimeout(pollTimer);
@@ -258,6 +299,50 @@
       <p class="text-2xs text-ink-3">
         {t("ai.license")}
       </p>
+    </section>
+  {/if}
+
+  {#if geo}
+    <section class="flex flex-col gap-2" aria-label={t("geo.title")}>
+      <div class="flex items-end justify-between gap-3">
+        <div class="flex min-w-0 flex-col">
+          <h2 class="label">{t("geo.title")}</h2>
+          <span class="data truncate text-2xs text-ink-3" title={geo.dir}>{geo.dir}</span>
+        </div>
+        {#if !geo.job.running}
+          <button class="btn {geo.ready ? '' : 'btn-primary'}" onclick={installGeo}>
+            <Download size={14} strokeWidth={1.5} />{geo.ready ? t("geo.update") : t("geo.downloadBtn")}
+          </button>
+        {/if}
+      </div>
+
+      {#if geo.job.running}
+        <div class="flex flex-col gap-1" aria-live="polite">
+          <div class="h-px w-full bg-line">
+            <div class="h-px bg-amber" style:width={pct(geo.job.done, geo.job.total)}></div>
+          </div>
+          <div class="data flex justify-between text-2xs text-ink-2">
+            <span>{GEO_PHASES[geo.job.phase ?? ""] ?? t("ai.preparing")}</span>
+            <span>{geo.job.phase === "assign" ? count(geo.job.assigned) : `${geo.job.done}/${geo.job.total}`}</span>
+          </div>
+        </div>
+      {/if}
+
+      <div class="data grid grid-cols-2 border border-line text-xs">
+        <div class="px-3 py-2">
+          <div class="label">{t("geo.places")}</div>
+          <div class={geo.ready ? "text-ink" : "text-amber"}>{geo.ready ? count(geo.places) : t("ai.missing")}</div>
+        </div>
+        <div class="border-l border-line px-3 py-2">
+          <div class="label">{t("geo.located")}</div>
+          <div class="text-ink">{count(geo.located)}/{count(geo.withGps)} · {pct(geo.located, geo.withGps)}</div>
+        </div>
+      </div>
+
+      {#if geo.job.error && !geo.job.running}
+        <p class="text-xs text-amber">{t("geo.failed", { error: geo.job.error })}</p>
+      {/if}
+      <p class="text-2xs text-ink-3">{t("geo.hint")}</p>
     </section>
   {/if}
 </div>

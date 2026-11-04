@@ -8,6 +8,7 @@ import { layoutError } from "../importLayout";
 import type { Backend } from "./backend";
 import type {
   AddedLibrary,
+  GeoDataDto,
   AutoTone,
   EditRecipe,
   EditStateDto,
@@ -1115,6 +1116,23 @@ export class MockBackend implements Backend {
   async modelsCancel(): Promise<ModelsDto> {
     this.modelCancelled = true;
     return this.modelsDto();
+  }
+
+  /** Örnek kütüphane yer verisiyle gelir; indirme anında biter. */
+  async geodataStatus(): Promise<GeoDataDto> {
+    return {
+      dir: "~/.local/share/loupe/geonames",
+      ready: true,
+      places: 214_632,
+      dataset: "geonames-cities500-3f9a1c0d2b7e",
+      withGps: 0,
+      located: 0,
+      job: { running: false, phase: null, done: 0, total: 0, assigned: 0, error: null },
+    };
+  }
+
+  async geodataInstall(): Promise<GeoDataDto> {
+    return this.geodataStatus();
   }
 
   // ───────────────────────────── Wi-Fi ─────────────────────────────

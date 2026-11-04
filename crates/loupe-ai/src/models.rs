@@ -635,6 +635,19 @@ fn pb_fields(b: &[u8], field: u64) -> Result<Vec<&[u8]>, AiError> {
 
 /// Arşivden tek üyeyi `out`'a çıkarır; yazarken SHA-256 hesaplar ve beklenenle
 /// karşılaştırır. Tutmazsa `out` silinir.
+/// Arşivden tek üye çıkarır; özet bilinmeyen (her gün değişen) veriler için.
+/// Boyut ve SHA-256 döner, doğrulama çağıranındır.
+pub fn extract_unverified(archive: &Path, kind: Archive, member: &str, out: &Path) -> Result<(u64, [u8; 32]), AiError> {
+    let result = match kind {
+        Archive::Zip => extract_zip(archive, member, out),
+        Archive::Tgz => extract_tgz(archive, member, out),
+    };
+    if result.is_err() {
+        let _ignored = std::fs::remove_file(out);
+    }
+    result
+}
+
 pub fn extract_member(archive: &Path, kind: Archive, member: &str, out: &Path, exp: Expected) -> Result<(), AiError> {
     let result = match kind {
         Archive::Zip => extract_zip(archive, member, out),

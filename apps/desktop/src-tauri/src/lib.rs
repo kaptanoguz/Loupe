@@ -14,9 +14,9 @@ use std::sync::Arc;
 use loupe_app::{
     AiStatusDto, AppConfig, AppCore, AppError, AppResult, AutoTone, CloudSettingsDto, CloudTargetInput,
     CloudTargetStatusDto, CullRequest, CullResult, DeviceDto, EditRecipe, EditStateDto, EncryptionDto, EventCard,
-    ExportDto, ExternalEditorDto, FaceRef, ImportRequest, ImportSessionDto, InspectorDetail, LibraryDto, ModelsDto,
-    PairingQrDto, PaletteRequest, PaletteResult, PeopleDto, RecoveryDraftDto, SidebarDto, SmartAlbumDto, StatusDto,
-    TimelineRequest, TimelineSlice, VerifyRunDto,
+    ExportDto, ExternalEditorDto, FaceRef, GeoDataDto, ImportRequest, ImportSessionDto, InspectorDetail, LibraryDto,
+    ModelsDto, PairingQrDto, PaletteRequest, PaletteResult, PeopleDto, RecoveryDraftDto, SidebarDto, SmartAlbumDto,
+    StatusDto, TimelineRequest, TimelineSlice, VerifyRunDto,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, Runtime, State};
@@ -448,6 +448,17 @@ async fn models_cancel(state: State<'_, Desktop>) -> Cmd<ModelsDto> {
     blocking(&state, |c| c.models_cancel()).await
 }
 
+#[tauri::command]
+async fn geodata_status(state: State<'_, Desktop>) -> Cmd<GeoDataDto> {
+    blocking(&state, |c| c.geodata_status()).await
+}
+
+/// İndirme ve atama arka planda sürer; ilerleme `geodata_status` ile yoklanır.
+#[tauri::command]
+async fn geodata_install(state: State<'_, Desktop>) -> Cmd<GeoDataDto> {
+    state.core.geodata_install()
+}
+
 // ───────────────────────────── Wi-Fi eşleşme ─────────────────────────────
 
 #[tauri::command]
@@ -649,6 +660,8 @@ pub fn wire<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             models_status,
             models_install,
             models_cancel,
+            geodata_status,
+            geodata_install,
             set_paused,
             set_resource_mode,
             pairing_qr,

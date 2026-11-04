@@ -13,7 +13,7 @@ use loupe_core::{ImportSessionId, LibraryId, MediaId};
 use loupe_db::{Pool, PoolConfig};
 use loupe_jobs::{JobHandler, JobKind, JobQueue, JobRouter, MediaPipeline, NewJob, Priority, WorkerPool};
 use loupe_lan::Discovery;
-use loupe_media::{GeoIndex, ThumbCache, ThumbProtocol, ThumbSize, Thumbnailer};
+use loupe_media::{ThumbCache, ThumbProtocol, ThumbSize, Thumbnailer};
 use loupe_storage::{LibraryWatcher, WatchEvent};
 use serde::Serialize;
 
@@ -93,6 +93,8 @@ pub struct AppCore {
     editor: crate::edit::Editor,
     ai: AiRuntime,
     models: crate::models::Models,
+    geodata: crate::geodata::GeoData,
+    geo: loupe_jobs::GeoSlot,
     search: loupe_search::SearchEngine,
     ranks: RankCache,
     recovery: Recovery,
@@ -146,6 +148,8 @@ impl AppCore {
             crate::edit::Editor::new(pool.clone(), libraries.clone(), queue.clone(), thumbs.clone(), cfg.edits_dir());
         let ai = AiRuntime::open(cfg.ai.clone());
         let models = crate::models::Models::new(cfg.data_dir.join("models"))?;
+        let geo: loupe_jobs::GeoSlot = Arc::default();
+        let geodata = crate::geodata::GeoData::new(cfg.geonames_dir(), pool.clone(), geo.clone());
         let search = match &ai.engine {
             Some(e) => loupe_search::SearchEngine::new(pool.clone(), e.clip_text.clone()),
             None => loupe_search::SearchEngine::keyword_only(pool.clone()),
@@ -163,6 +167,8 @@ impl AppCore {
             editor,
             ai,
             models,
+            geodata,
+            geo,
             search,
             ranks: RankCache::default(),
             recovery: Recovery::default(),
@@ -202,12 +208,20 @@ impl AppCore {
 
     fn start_workers(&self) -> AppResult<()> {
         let Some(wcfg) = self.cfg.workers.clone() else { return Ok(()) };
-        let geo = GeoIndex::load_dir(&self.cfg.geonames_dir()).ok().map(Arc::new);
+        // Yer verisi yoksa ya da okunamazsa fotoğraflar yersiz kalır; Ayarlar'dan indirilir.
+        if let Ok(Some(geo)) = self.geodata.load() {
+            // Veri yokken içe aktarılan GPS'li fotoğraflar.
+            let pool = self.pool.clone();
+            std::thread::spawn(move || {
+                let _assigned = crate::geodata::assign_missing(&pool, &geo, |_| {});
+            });
+        }
         let libs = self.libraries.clone();
         let thumbnailer = Thumbnailer::new(self.thumbs.clone(), loupe_media::thumb::default_backend());
         // `md` küçük resmi çıkınca yüz, CLIP ve (gecikmeli) etkinlik işleri açılır.
         let pipeline =
-            MediaPipeline::new(self.pool.clone(), thumbnailer, geo, move |m| libs.media_path(m).ok().flatten());
+            MediaPipeline::new(self.pool.clone(), thumbnailer, None, move |m| libs.media_path(m).ok().flatten())
+                .with_geo_slot(self.geo.clone());
         let handler: Arc<dyn JobHandler> = Arc::new(
             JobRouter::new()
                 .route(&[JobKind::Thumb, JobKind::MetadataFull, JobKind::Geocode], Arc::new(pipeline))
@@ -720,6 +734,15 @@ impl AppCore {
     pub fn models_install(&self) -> AppResult<crate::models::ModelsDto> {
         self.models.install()?;
         self.models_status()
+    }
+
+    pub fn geodata_status(&self) -> AppResult<crate::geodata::GeoDataDto> {
+        self.geodata.status()
+    }
+
+    pub fn geodata_install(&self) -> AppResult<crate::geodata::GeoDataDto> {
+        self.geodata.install()?;
+        self.geodata_status()
     }
 
     pub fn models_cancel(&self) -> AppResult<crate::models::ModelsDto> {
