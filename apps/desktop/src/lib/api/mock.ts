@@ -30,6 +30,7 @@ import type {
   DeviceDto,
   EncryptionDto,
   EventCard,
+  PlacePin,
   FaceRef,
   ImageSize,
   ImportRequest,
@@ -124,6 +125,19 @@ interface MockCluster {
 }
 /** 2025-10-24 12:00 UTC */
 const NEWEST = 1_761_307_200;
+
+/** Örnek yerler; fotoğraflar kimliğe göre dağıtılır. */
+const MOCK_PLACES: Omit<PlacePin, "count" | "cover">[] = [
+  { id: 1, lat: 38.643, lon: 34.829, title: "Göreme", subtitle: "Nevşehir, Türkiye" },
+  { id: 2, lat: 41.013, lon: 28.955, title: "İstanbul", subtitle: "İstanbul, Türkiye" },
+  { id: 3, lat: 36.885, lon: 30.703, title: "Antalya", subtitle: "Antalya, Türkiye" },
+  { id: 4, lat: 39.92, lon: 32.854, title: "Ankara", subtitle: "Ankara, Türkiye" },
+  { id: 5, lat: 48.857, lon: 2.352, title: "Paris", subtitle: "Île-de-France, France" },
+  { id: 6, lat: 41.893, lon: 12.483, title: "Roma", subtitle: "Lazio, Italy" },
+  { id: 7, lat: 35.68, lon: 139.769, title: "Tokyo", subtitle: "Tokyo, Japan" },
+  { id: 8, lat: 40.713, lon: -74.006, title: "New York", subtitle: "New York, United States" },
+  { id: 9, lat: 38.423, lon: 27.143, title: "İzmir", subtitle: "İzmir, Türkiye" },
+];
 
 export class MockBackend implements Backend {
   readonly items: TileItem[] = [];
@@ -335,6 +349,12 @@ export class MockBackend implements Backend {
       case "event": {
         const ids = new Set(this.eventMedia.get(req.view.id) ?? []);
         return this.items.filter((i) => ids.has(i.id));
+      }
+      case "place": {
+        const { id } = req.view;
+        const n = MOCK_PLACES.length;
+        const at = MOCK_PLACES.findIndex((p) => p.id === id);
+        return at < 0 ? [] : this.items.filter((i) => i.id % n === at);
       }
       default:
         return this.items;
@@ -988,6 +1008,16 @@ export class MockBackend implements Backend {
 
   async ignoreCluster(cluster: number, ignored: boolean): Promise<void> {
     for (const c of this.clusters) if (c.id === cluster) c.ignored = ignored;
+  }
+
+  // ───────────────────────────── yerler ─────────────────────────────
+
+  async placePins(): Promise<PlacePin[]> {
+    const n = MOCK_PLACES.length;
+    return MOCK_PLACES.map((p, at) => {
+      const media = this.items.filter((i) => i.id % n === at);
+      return { ...p, count: media.length, cover: media[0]?.hash ?? null };
+    }).sort((a, b) => b.count - a.count);
   }
 
   // ───────────────────────────── etkinlikler ─────────────────────────────

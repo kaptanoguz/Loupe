@@ -148,6 +148,14 @@ fn commands_round_trip_through_ipc() {
     let people = call(&w, "list_people", json!({})).unwrap();
     assert_eq!(people["named"].as_array().unwrap().len(), 0);
     assert!(call(&w, "list_events", json!({})).unwrap().is_array());
+    assert_eq!(call(&w, "place_pins", json!({})).unwrap(), json!([]), "yer verisi yokken işaret yok");
+    let place = call(
+        &w,
+        "get_timeline_slice",
+        json!({ "req": { "view": { "kind": "place", "id": 1 }, "offset": 0, "limit": 10 } }),
+    )
+    .unwrap();
+    assert_eq!(place["total"], 0);
     let models = call(&w, "models_status", json!({})).unwrap();
     assert_eq!(models["ready"], false);
     assert!(

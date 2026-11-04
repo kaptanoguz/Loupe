@@ -15,8 +15,8 @@ use loupe_app::{
     AiStatusDto, AppConfig, AppCore, AppError, AppResult, AutoTone, CloudSettingsDto, CloudTargetInput,
     CloudTargetStatusDto, CullRequest, CullResult, DeviceDto, EditRecipe, EditStateDto, EncryptionDto, EventCard,
     ExportDto, ExternalEditorDto, FaceRef, GeoDataDto, ImportRequest, ImportSessionDto, InspectorDetail, LibraryDto,
-    ModelsDto, PairingQrDto, PaletteRequest, PaletteResult, PeopleDto, RecoveryDraftDto, SidebarDto, SmartAlbumDto,
-    StatusDto, TimelineRequest, TimelineSlice, VerifyRunDto,
+    ModelsDto, PairingQrDto, PaletteRequest, PaletteResult, PeopleDto, PlacePin, RecoveryDraftDto, SidebarDto,
+    SmartAlbumDto, StatusDto, TimelineRequest, TimelineSlice, VerifyRunDto,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, Runtime, State};
@@ -393,6 +393,13 @@ async fn ignore_cluster(state: State<'_, Desktop>, cluster: i64, ignored: bool) 
     blocking(&state, move |c| c.ignore_cluster(cluster, ignored)).await
 }
 
+// ───────────────────────────── yerler ─────────────────────────────
+
+#[tauri::command]
+async fn place_pins(state: State<'_, Desktop>) -> Cmd<Vec<PlacePin>> {
+    blocking(&state, |c| c.place_pins()).await
+}
+
 // ───────────────────────────── etkinlikler ─────────────────────────────
 
 #[tauri::command]
@@ -652,6 +659,7 @@ pub fn wire<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
             detach_face,
             reject_face,
             ignore_cluster,
+            place_pins,
             list_events,
             rename_event,
             exclude_from_event,

@@ -17,7 +17,8 @@ export type View =
   | { kind: "search"; query: SearchQuery }
   | { kind: "person"; id: number }
   | { kind: "cluster"; id: number }
-  | { kind: "event"; id: number };
+  | { kind: "event"; id: number }
+  | { kind: "place"; id: number };
 
 export type ViewKey = "all" | "favorites" | "videos" | "events" | "people" | "places";
 
@@ -649,4 +650,16 @@ export interface ExportDto {
 export interface ExternalEditorDto {
   id: "darktable" | "gimp";
   name: string;
+}
+
+/** Yerler haritasında bir işaret: fotoğrafı olan bir yer. */
+export interface PlacePin {
+  id: number;
+  lat: number;
+  lon: number;
+  title: string;
+  subtitle: string | null;
+  count: number;
+  /** En yeni fotoğrafın BLAKE3 hex'i. */
+  cover: string | null;
 }

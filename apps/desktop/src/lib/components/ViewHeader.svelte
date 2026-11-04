@@ -1,5 +1,7 @@
 <script lang="ts">
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
+  import LayoutGrid from "@lucide/svelte/icons/layout-grid";
+  import MapIcon from "@lucide/svelte/icons/map";
   import Pencil from "@lucide/svelte/icons/pencil";
   import Save from "@lucide/svelte/icons/save";
   import Trash from "@lucide/svelte/icons/trash";
@@ -53,6 +55,8 @@
         return { view: { kind: "people" }, label: t("view.people") };
       case "event":
         return { view: { kind: "events" }, label: t("view.events") };
+      case "place":
+        return { view: { kind: "places" }, label: t("view.places") };
       default:
         return { view: { kind: "all" }, label: t("view.all") };
     }
@@ -184,6 +188,22 @@
     {/if}
   {:else if view.kind === "smart_album"}
     <button class="btn" onclick={removeAlbum}><Trash size={14} strokeWidth={1.5} />{t("vh.deleteAlbum")}</button>
+  {:else if view.kind === "places"}
+    {@const map = catalog.mapOptions.map}
+    <div class="flex" role="radiogroup" aria-label={t("vh.placesAs")}>
+      <button
+        class="btn rounded-r-none {map ? 'text-ink' : 'text-ink-3'}"
+        role="radio"
+        aria-checked={map}
+        onclick={() => catalog.setMap({ map: true })}><MapIcon size={14} strokeWidth={1.5} />{t("vh.map")}</button
+      >
+      <button
+        class="btn -ml-px rounded-l-none {map ? 'text-ink-3' : 'text-ink'}"
+        role="radio"
+        aria-checked={!map}
+        onclick={() => catalog.setMap({ map: false })}><LayoutGrid size={14} strokeWidth={1.5} />{t("vh.grid")}</button
+      >
+    </div>
   {/if}
-  <ArrangeMenu {catalog} />
+  {#if !(view.kind === "places" && catalog.mapOptions.map)}<ArrangeMenu {catalog} />{/if}
 </header>

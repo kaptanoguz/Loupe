@@ -977,6 +977,16 @@ async fn place_data_downloads_verifies_and_assigns_gps_photos() {
     assert_eq!(places.sections.len(), 1);
     assert_eq!(places.sections[0].title, "Göreme");
 
+    // Harita: fotoğrafı olan her yer bir işaret; işaret o yerin görünümünü açar.
+    let pins = loupe_app::places::pins(&pool).unwrap();
+    assert_eq!(pins.len(), 1);
+    let pin = &pins[0];
+    assert_eq!((pin.title.as_str(), pin.count), ("Göreme", 1));
+    assert_eq!(pin.cover.as_ref().map(String::len), Some(64));
+    assert!((pin.lat - 38.64).abs() < 0.1 && (pin.lon - 34.83).abs() < 0.1, "{pin:?}");
+    let one = fx.slice(View::Place { id: pin.id }, Grouping::Day, 0, 10);
+    assert_eq!(one.items.iter().map(|i| MediaId(i.id)).collect::<Vec<_>>(), vec![goreme]);
+
     // Açılışta yeniden yüklenir; atama tekrarında yeni satır çıkmaz.
     let reopened = GeoData::new(dir, pool.clone(), Arc::default());
     let idx = reopened.load().unwrap().unwrap();

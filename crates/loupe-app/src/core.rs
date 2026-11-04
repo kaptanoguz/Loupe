@@ -661,6 +661,12 @@ impl AppCore {
         people::ignore_cluster(&self.pool, cluster, ignored)
     }
 
+    // ───────────────────────────── yerler ─────────────────────────────
+
+    pub fn place_pins(&self) -> AppResult<Vec<crate::places::PlacePin>> {
+        crate::places::pins(&self.pool)
+    }
+
     // ───────────────────────────── etkinlikler ─────────────────────────────
 
     pub fn events(&self) -> AppResult<Vec<EventCard>> {
