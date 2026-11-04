@@ -12,7 +12,7 @@ pub mod queue;
 pub mod throttle;
 pub mod worker;
 
-pub use handlers::MediaPipeline;
+pub use handlers::{GeoSlot, MediaPipeline};
 pub use model::{Job, JobError, JobId, JobKind, JobRecord, JobState, NewJob, Priority, QueueStats};
 pub use queue::{ENQUEUE_BATCH, JobQueue, RetryPolicy};
 pub use throttle::{ResourceMode, Throttle};

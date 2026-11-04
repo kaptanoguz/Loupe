@@ -28,6 +28,7 @@ import type {
   EncryptionDto,
   EventCard,
   FaceRef,
+  GeoDataDto,
   ImageSize,
   ImportRequest,
   ImportSessionDto,
@@ -114,6 +115,9 @@ export interface Backend {
   /** Arka planda indirir; ilerleme `modelsStatus` ile yoklanır. */
   modelsInstall(): Promise<ModelsDto>;
   modelsCancel(): Promise<ModelsDto>;
+  geodataStatus(): Promise<GeoDataDto>;
+  /** Arka planda indirir ve GPS'li fotoğrafları yerlere atar; `geodataStatus` ile yoklanır. */
+  geodataInstall(): Promise<GeoDataDto>;
 
   pairingQr(): Promise<PairingQrDto>;
   cancelPairing(): Promise<void>;
@@ -240,6 +244,8 @@ export const tauriBackend: Backend = {
   modelsStatus: () => call("models_status"),
   modelsInstall: () => call("models_install"),
   modelsCancel: () => call("models_cancel"),
+  geodataStatus: () => call("geodata_status"),
+  geodataInstall: () => call("geodata_install"),
 
   pairingQr: () => call("pairing_qr"),
   cancelPairing: () => call("cancel_pairing"),

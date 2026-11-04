@@ -27,6 +27,7 @@ loupe-media.workspace = true
 loupe-search.workspace = true
 loupe-storage.workspace = true
 qrcode.workspace = true
+reqwest.workspace = true
 rusqlite.workspace = true
 secret-service.workspace = true
 serde.workspace = true
@@ -37,6 +38,7 @@ uuid.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+axum.workspace = true
 image.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

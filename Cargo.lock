@@ -3051,6 +3051,7 @@ dependencies = [
 name = "loupe-app"
 version = "0.3.4"
 dependencies = [
+ "axum",
  "http",
  "if-addrs",
  "image",
@@ -3064,6 +3065,7 @@ dependencies = [
  "loupe-search",
  "loupe-storage",
  "qrcode",
+ "reqwest 0.12.28",
  "rusqlite",
  "secret-service",
  "serde",

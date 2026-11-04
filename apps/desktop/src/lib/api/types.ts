@@ -471,6 +471,26 @@ export interface ModelsDto {
   job: ModelJobDto;
 }
 
+export interface GeoJobDto {
+  running: boolean;
+  phase: "download" | "verify" | "assign" | "done" | null;
+  done: number;
+  total: number;
+  assigned: number;
+  error: string | null;
+}
+
+/** Çevrimdışı ters coğrafi kodlama verisi (GeoNames). */
+export interface GeoDataDto {
+  dir: string;
+  ready: boolean;
+  places: number;
+  dataset: string | null;
+  withGps: number;
+  located: number;
+  job: GeoJobDto;
+}
+
 // ───────────────────────────── Wi-Fi eşleştirme ─────────────────────────────
 
 export interface PairingQrDto {

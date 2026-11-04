@@ -8,7 +8,7 @@
 //! İşleyicileri `loupe-ai` sağlar; [`crate::JobRouter`] ile aynı havuza takılır.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use loupe_core::{MediaFileType, MediaId};
@@ -49,10 +49,13 @@ impl From<DbError> for JobError {
     }
 }
 
+/// Yer verisi sonradan indirilebilir: işleyici her işte güncel dizini okur.
+pub type GeoSlot = Arc<RwLock<Option<Arc<GeoIndex>>>>;
+
 pub struct MediaPipeline {
     pool: Arc<Pool>,
     thumbnailer: Thumbnailer,
-    geo: Option<Arc<GeoIndex>>,
+    geo: GeoSlot,
     resolve: Box<PathResolver>,
     ai_followups: bool,
     event_debounce: Duration,
@@ -62,7 +65,7 @@ impl std::fmt::Debug for MediaPipeline {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MediaPipeline")
             .field("thumbnailer", &self.thumbnailer)
-            .field("geo", &self.geo.as_ref().map(|g| g.dataset_ver().to_owned()))
+            .field("geo", &self.geo.read().ok().and_then(|g| g.as_ref().map(|g| g.dataset_ver().to_owned())))
             .finish_non_exhaustive()
     }
 }
@@ -78,11 +81,18 @@ impl MediaPipeline {
         Self {
             pool,
             thumbnailer,
-            geo,
+            geo: Arc::new(RwLock::new(geo)),
             resolve: Box::new(resolve),
             ai_followups: true,
             event_debounce: Duration::from_secs(30),
         }
+    }
+
+    /// Uygulamayla paylaşılan yer dizini (indirme bitince yerine konur).
+    #[must_use]
+    pub fn with_geo_slot(mut self, slot: GeoSlot) -> Self {
+        self.geo = slot;
+        self
     }
 
     /// AI işleyicisi olmayan kurulumlar (ör. yalnızca küçük resim testleri) için.
@@ -224,7 +234,8 @@ impl MediaPipeline {
     }
 
     fn assign_place(&self, id: MediaId, lat: f64, lon: f64) -> Result<(), JobError> {
-        let Some(geo) = &self.geo else { return Ok(()) };
+        let geo = self.geo.read().map_err(|_| JobError::transient("GEO", "yer dizini kilidi zehirlendi"))?.clone();
+        let Some(geo) = geo else { return Ok(()) };
         let Some(place) = geo.reverse(lat, lon)? else { return Ok(()) };
         let loc = new_location(&place, geo.dataset_ver());
         self.pool.write(|c| {
