@@ -31,7 +31,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' thumb: http://thumb.localhost data:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'; worker-src 'self' blob:; connect-src ipc: http://ipc.localhost"
+      "csp": "default-src 'self'; img-src 'self' thumb: http://thumb.localhost https://tile.openstreetmap.org data:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'; worker-src 'self' blob:; connect-src ipc: http://ipc.localhost"
     }
   },
   "bundle": {

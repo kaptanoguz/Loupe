@@ -56,6 +56,10 @@ pub enum View {
     Event {
         id: i64,
     },
+    /// Tek yerin fotoğrafları (haritadaki işaretten açılır).
+    Place {
+        id: i64,
+    },
 }
 
 impl View {
@@ -339,6 +343,7 @@ fn plan(conn: &Connection, view: &View, arrange: Arrange, ranked: Option<&[i64]>
             order: "p.name COLLATE NOCASE, p.id, m.taken_at_utc DESC, m.id DESC".into(),
             dated: false,
         },
+        View::Place { id } => by_date(format!("{base} AND m.location_id = ?1"), vec![Value::Integer(*id)]),
         View::Places => Plan {
             joins: String::new(),
             where_sql: format!("{base} AND m.location_id IS NOT NULL"),

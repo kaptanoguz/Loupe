@@ -27,6 +27,7 @@ import type {
   DeviceDto,
   EncryptionDto,
   EventCard,
+  PlacePin,
   FaceRef,
   GeoDataDto,
   ImageSize,
@@ -102,6 +103,8 @@ export interface Backend {
   detachFace(face: number): Promise<number>;
   rejectFace(face: number): Promise<void>;
   ignoreCluster(cluster: number, ignored: boolean): Promise<void>;
+
+  placePins(): Promise<PlacePin[]>;
 
   listEvents(): Promise<EventCard[]>;
   renameEvent(id: number, title: string): Promise<EventCard>;
@@ -232,6 +235,8 @@ export const tauriBackend: Backend = {
   detachFace: (face) => call("detach_face", { face }),
   rejectFace: (face) => call("reject_face", { face }),
   ignoreCluster: (cluster, ignored) => call("ignore_cluster", { cluster, ignored }),
+
+  placePins: () => call("place_pins"),
 
   listEvents: () => call("list_events"),
   renameEvent: (id, title) => call("rename_event", { id, title }),

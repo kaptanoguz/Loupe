@@ -343,6 +343,18 @@
         <p class="text-xs text-amber">{t("geo.failed", { error: geo.job.error })}</p>
       {/if}
       <p class="text-2xs text-ink-3">{t("geo.hint")}</p>
+      <label class="flex items-start gap-2 text-sm text-ink-2">
+        <input
+          type="checkbox"
+          class="mt-0.5"
+          checked={catalog.mapOptions.osm}
+          onchange={(e) => catalog.setMap({ osm: e.currentTarget.checked })}
+        />
+        <span class="flex flex-col gap-0.5">
+          {t("geo.osm")}
+          <span class="text-2xs text-ink-3">{t("geo.osmHint")}</span>
+        </span>
+      </label>
     </section>
   {/if}
 </div>

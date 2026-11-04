@@ -104,6 +104,26 @@ function loadSlide(): SlideOptions {
 /** Bilgi notu durum çubuğunda bu kadar kalır (ms). */
 export const NOTICE_MS = 4000;
 
+/** Yerler görünümünün biçimi ve haritanın çevrimiçi katmanı. */
+export interface MapOptions {
+  /** Yerler haritada mı (yoksa yer başlıklı ızgarada mı) gösterilir. */
+  map: boolean;
+  /** OpenStreetMap karoları: varsayılan kapalı, ağ isteği yapar. */
+  osm: boolean;
+}
+
+export const DEFAULT_MAP: MapOptions = { map: true, osm: false };
+const MAP_KEY = "loupe.map";
+
+function loadMap(): MapOptions {
+  try {
+    const m = JSON.parse(localStorage.getItem(MAP_KEY) ?? "{}") as Partial<MapOptions>;
+    return { map: m.map !== false, osm: m.osm === true };
+  } catch {
+    return DEFAULT_MAP;
+  }
+}
+
 export class Catalog {
   view = $state<View>({ kind: "all" });
   /** Sıralama ve yön; bölümleme `grouping`. */
@@ -145,6 +165,7 @@ export class Catalog {
   menu = $state.raw<{ x: number; y: number } | null>(null);
   slideshow = $state.raw<Slideshow | null>(null);
   slide = $state.raw<SlideOptions>(DEFAULT_SLIDE);
+  mapOptions = $state.raw<MapOptions>(DEFAULT_MAP);
   /** Son düzen hesabının süresi (ms), durum çubuğunda. */
   layoutMs = $state(0);
   /** Grid'in son hesapladığı düzen (↑/↓ komşu araması için). */
@@ -165,6 +186,17 @@ export class Catalog {
     this.dir = a.dir;
     this.grouping = a.grouping;
     this.slide = loadSlide();
+    this.mapOptions = loadMap();
+  }
+
+  /** Harita/ızgara ve OSM katmanı tercihi; saklanır. */
+  setMap(patch: Partial<MapOptions>): void {
+    this.mapOptions = { ...this.mapOptions, ...patch };
+    try {
+      localStorage.setItem(MAP_KEY, JSON.stringify(this.mapOptions));
+    } catch {
+      // Bu oturumda geçerli kalır.
+    }
   }
 
   get arrange(): Arrange {

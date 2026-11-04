@@ -23,6 +23,7 @@ pub mod models;
 pub mod moments;
 pub mod network;
 pub mod people;
+pub mod places;
 pub mod search;
 pub mod secrets;
 pub mod timeline;
@@ -47,6 +48,7 @@ pub use models::{ModelJobDto, ModelsDto};
 pub use moments::EventCard;
 pub use network::{CloudTargetStatusDto, DeviceDto, LanStatusDto, PairingQrDto};
 pub use people::{FaceRef, PeopleDto, PersonCard};
+pub use places::PlacePin;
 pub use search::{PaletteRequest, PaletteResult};
 pub use secrets::{FileSecretStore, LayeredSecretStore, SecretServiceStore, SecretStore};
 pub use timeline::{

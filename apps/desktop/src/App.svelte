@@ -10,6 +10,7 @@
   import Loupe from "./lib/components/Loupe.svelte";
   import Palette, { type CommandId, type PaletteCommand } from "./lib/components/Palette.svelte";
   import People from "./lib/components/People.svelte";
+  import PlacesMap from "./lib/components/PlacesMap.svelte";
   import Settings from "./lib/components/Settings.svelte";
   import Sidebar from "./lib/components/Sidebar.svelte";
   import StatusBar from "./lib/components/StatusBar.svelte";
@@ -314,7 +315,11 @@
         <div class="flex min-w-0 flex-1 flex-col">
           <ViewHeader {catalog} />
           <div class="flex min-h-0 flex-1">
-            <Grid {catalog} engine={layoutEngine} onAddFolder={addFolder} />
+            {#if catalog.view.kind === "places" && catalog.mapOptions.map}
+              <PlacesMap {catalog} />
+            {:else}
+              <Grid {catalog} engine={layoutEngine} onAddFolder={addFolder} />
+            {/if}
           </div>
         </div>
       {/if}
